@@ -31,14 +31,21 @@ def build_classification_user_content(
     merged_context: str,
     client: str | None,
     issue_key: str | None,
+    retry_feedback: str | None = None,
+    max_chars: int | None = None,
 ) -> str:
     """Assemble the user message with metadata, description, and attachment text.
+
+    When ``retry_feedback`` is set, it is appended after truncation so a retry
+    sees a different instruction than the first attempt.
 
     Args:
         description: Ticket narrative.
         merged_context: Sanitized text merged from parsers.
         client: Optional client identifier.
         issue_key: Optional external ticket key.
+        retry_feedback: Extra instruction for a low-confidence or invalid retry.
+        max_chars: Optional cap applied to the ticket body before the retry note.
 
     Returns:
         Single string sent as the user turn to the LLM.
@@ -56,4 +63,9 @@ def build_classification_user_content(
         "\nClassify the primary responsible IT support function. "
         "Return needs_review if evidence is insufficient."
     )
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if max_chars is not None and len(text) > max_chars:
+        text = text[:max_chars] + "\n...[truncated]"
+    if retry_feedback and retry_feedback.strip():
+        text += "\n\n=== Retry instruction ===\n" + retry_feedback.strip()
+    return text

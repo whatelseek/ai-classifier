@@ -1,7 +1,13 @@
 """LangGraph node: decide which parallel extraction branches to run."""
 
+import logging
+import time
+
 from app.graph.state import AgentState
+from app.graph.telemetry import log_node
 from app.parsers.registry import category_for_filename, parser_kind_for_file
+
+logger = logging.getLogger(__name__)
 
 
 def detect_attachments(state: AgentState) -> dict:
@@ -11,8 +17,10 @@ def detect_attachments(state: AgentState) -> dict:
         state: Graph state after validation.
 
     Returns:
-        Partial update with a ``branches`` dictionary consumed by ``fan_out_processing``.
+        Partial update with a ``branches`` dictionary for logs. Fan-out itself
+        sends one worker per attachment.
     """
+    started = time.perf_counter()
     attachments = state.get("attachments") or []
     branches = {
         "text": bool((state.get("description") or "").strip()),
@@ -36,4 +44,5 @@ def detect_attachments(state: AgentState) -> dict:
         elif cat in ("text", "structured") or kind is not None:
             branches["docs"] = True
 
+    log_node(logger, "detect_attachments", started, **{f"branch_{k}": v for k, v in branches.items()})
     return {"branches": branches}

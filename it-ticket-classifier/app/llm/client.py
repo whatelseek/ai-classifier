@@ -1,18 +1,44 @@
 """OpenAI Responses API client for classification and vision inference."""
 
 import base64
-import json
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    AsyncOpenAI,
+    InternalServerError,
+    RateLimitError,
+)
 
 from app.core.config import Settings
 from app.llm.prompts import CLASSIFICATION_SYSTEM_PROMPT, build_classification_user_content
-from app.llm.schemas import CLASSIFICATION_JSON_SCHEMA, LLMClassificationOutput
+from app.llm.schemas import LLMClassificationOutput
 
 logger = logging.getLogger(__name__)
+
+# Transient Responses API failures. LangGraph RetryPolicy retries these;
+# the SDK client itself does not, so a node attempt is one HTTP call.
+TRANSIENT_LLM_ERRORS = (
+    APIConnectionError,
+    APITimeoutError,
+    InternalServerError,
+    RateLimitError,
+)
+
+
+def is_transient_llm_error(exc: BaseException) -> bool:
+    """Return True when an exception is a retryable OpenAI transport failure.
+
+    Args:
+        exc: Exception raised by the OpenAI SDK or a wrapper.
+
+    Returns:
+        True for connection, timeout, rate-limit, and 5xx errors.
+    """
+    return isinstance(exc, TRANSIENT_LLM_ERRORS)
 
 
 @dataclass
@@ -51,10 +77,12 @@ class OpenAIClassificationClient:
         self._settings = settings
         self._client: AsyncOpenAI | None = None
         if settings.openai_configured:
+            # Retries are owned by the LangGraph RetryPolicy on LLM nodes so
+            # only the failing branch is repeated.
             self._client = AsyncOpenAI(
                 api_key=settings.openai_api_key,
                 timeout=settings.openai_timeout_seconds,
-                max_retries=settings.openai_max_retries,
+                max_retries=0,
             )
 
     @property
@@ -69,8 +97,12 @@ class OpenAIClassificationClient:
         client: str | None,
         issue_key: str | None,
         usage: LLMUsageTracker,
+        retry_feedback: str | None = None,
     ) -> LLMClassificationOutput:
         """Run structured classification over description and merged attachment text.
+
+        Uses ``responses.parse`` so the SDK sends a strict JSON schema
+        (``additionalProperties: false`` and every property required).
 
         Args:
             description: Ticket body.
@@ -78,45 +110,42 @@ class OpenAIClassificationClient:
             client: Optional client name for the prompt.
             issue_key: Optional ticket id for the prompt.
             usage: Mutable tracker updated with token counts.
+            retry_feedback: Optional note that makes a retry prompt differ
+                from the previous attempt.
 
         Returns:
             Validated ``LLMClassificationOutput``.
 
         Raises:
             RuntimeError: When no API key is configured.
-            ValueError: When the model returns empty or invalid JSON.
+            TypeError: When the model returns an empty parsed payload.
         """
         if not self._client:
             raise RuntimeError("OpenAI API key is not configured")
 
         user_content = build_classification_user_content(
-            description, merged_context, client, issue_key
+            description,
+            merged_context,
+            client,
+            issue_key,
+            retry_feedback=retry_feedback,
+            max_chars=self._settings.openai_max_input_tokens * 4,
         )
-        max_chars = self._settings.openai_max_input_tokens * 4
-        if len(user_content) > max_chars:
-            user_content = user_content[:max_chars] + "\n...[truncated]"
 
-        response = await self._client.responses.create(
+        response = await self._client.responses.parse(
             model=self._settings.openai_text_model,
             input=[
                 {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
             ],
-            text={
-                "format": {
-                    "type": "json_schema",
-                    "name": "ticket_classification",
-                    "schema": CLASSIFICATION_JSON_SCHEMA,
-                    "strict": True,
-                }
-            },
+            text_format=LLMClassificationOutput,
         )
         usage.record(response.usage)
 
-        text = _extract_output_text(response)
-        if not text:
-            raise ValueError("Empty model response")
-        return LLMClassificationOutput.model_validate(json.loads(text))
+        parsed = response.output_parsed
+        if not isinstance(parsed, LLMClassificationOutput):
+            raise TypeError("Empty model response")
+        return parsed
 
     async def analyze_image(
         self,

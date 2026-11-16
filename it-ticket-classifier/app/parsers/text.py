@@ -3,11 +3,15 @@
 import csv
 import io
 import json
+import logging
 
 import yaml
 
+from app.core.errors import EXTRACTION_FAILED
 from app.core.security import sanitize_for_llm
 from app.parsers.base import BaseParser, ParseResult, ParserKind
+
+logger = logging.getLogger(__name__)
 
 
 class TextParser(BaseParser):
@@ -27,12 +31,13 @@ class TextParser(BaseParser):
                 text=text,
                 source_ref=filename,
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("Text extraction failed for %s", filename)
             return ParseResult(
                 filename=filename,
                 parser="text",
                 status="failed",
-                error=str(exc),
+                error=EXTRACTION_FAILED,
             )
 
 
@@ -48,11 +53,11 @@ class StructuredTextParser(BaseParser):
             raw = data.decode("utf-8", errors="replace")
             if ext == "json":
                 obj = json.loads(raw)
-                text = json.dumps(obj, indent=2)[:50000]
+                text = sanitize_for_llm(json.dumps(obj, indent=2)[:50000])
                 parser_name = "json"
             elif ext in ("yaml", "yml"):
                 obj = yaml.safe_load(raw)
-                text = yaml.safe_dump(obj)[:50000]
+                text = sanitize_for_llm(yaml.safe_dump(obj)[:50000])
                 parser_name = "yaml"
             else:
                 text = sanitize_for_llm(raw)
@@ -64,12 +69,13 @@ class StructuredTextParser(BaseParser):
                 text=text,
                 source_ref=filename,
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("Structured extraction failed for %s", filename)
             return ParseResult(
                 filename=filename,
                 parser="structured",
                 status="failed",
-                error=str(exc),
+                error=EXTRACTION_FAILED,
             )
 
 
@@ -93,10 +99,11 @@ class CsvParser(BaseParser):
                 text=text,
                 source_ref=filename,
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("CSV extraction failed for %s", filename)
             return ParseResult(
                 filename=filename,
                 parser="csv",
                 status="failed",
-                error=str(exc),
+                error=EXTRACTION_FAILED,
             )

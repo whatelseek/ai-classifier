@@ -1,12 +1,18 @@
 """Integration tests for FastAPI endpoints and multipart classification."""
 
+import asyncio
 import io
+import time
 import zipfile
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from app.api.dependencies import get_app_settings, get_request_semaphore
+from app.core.config import Settings
 from app.main import create_app
+from app.models.requests import ClassifyRequestPayload
+from app.services.classifier import ClassificationService
 
 
 @pytest.fixture
@@ -87,6 +93,101 @@ async def test_classify_vsdx(app):
         body = resp.json()
         assert body["attachments"][0]["status"] == "processed"
         assert body["attachments"][0]["parser"] == "vsdx"
+
+
+@pytest.mark.asyncio
+async def test_two_log_files_are_both_processed(app):
+    transport = ASGITransport(app=app)
+    files = [
+        ("files", ("a.log", io.BytesIO(b"vpn ipsec checkpoint\n"), "text/plain")),
+        ("files", ("b.log", io.BytesIO(b"postgresql replication wal\n"), "text/plain")),
+    ]
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/v1/classify", files=files)
+        body = resp.json()
+        names = {item["filename"]: item["status"] for item in body["attachments"]}
+        assert names == {"a.log": "processed", "b.log": "processed"}
+        assert body["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests_keep_separate_results(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        network, database = await asyncio.gather(
+            client.post(
+                "/api/v1/classify",
+                data={"description": "IPsec VPN tunnel is not working with Check Point"},
+            ),
+            client.post(
+                "/api/v1/classify",
+                data={"description": "PostgreSQL replication is broken"},
+            ),
+        )
+    assert network.json()["classification"]["function"] == "network"
+    assert database.json()["classification"]["function"] == "database"
+    assert network.json()["request_id"] != database.json()["request_id"]
+
+
+@pytest.mark.asyncio
+async def test_queue_wait_counts_toward_request_timeout(app):
+    app.dependency_overrides[get_app_settings] = lambda: Settings(
+        request_timeout_seconds=1,
+        openai_api_key="",
+    )
+    app.dependency_overrides[get_request_semaphore] = lambda: asyncio.Semaphore(0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/classify",
+            data={"description": "IPsec VPN tunnel is not working"},
+        )
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["code"] == "timeout"
+    assert "Traceback" not in body["errors"][0]["message"]
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_internal_error_hides_exception_text():
+    service = ClassificationService(Settings(openai_api_key="", request_timeout_seconds=30))
+
+    class Boom:
+        async def ainvoke(self, *_args, **_kwargs):
+            raise RuntimeError("secret /tmp/openai-key sk-live")
+
+    service._graph = Boom()
+    response = await service.classify(
+        ClassifyRequestPayload(
+            description="VPN down",
+            issue_key=None,
+            client=None,
+            attachments=[],
+        ),
+        started_at=time.perf_counter(),
+    )
+    assert response.status.value == "failed"
+    message = response.errors[0]["message"]
+    assert response.errors[0]["code"] == "internal_error"
+    assert "secret" not in message
+    assert "sk-live" not in message
+
+
+@pytest.mark.asyncio
+async def test_elapsed_budget_returns_timeout_before_the_graph():
+    service = ClassificationService(Settings(openai_api_key="", request_timeout_seconds=5))
+    response = await service.classify(
+        ClassifyRequestPayload(
+            description="VPN down",
+            issue_key=None,
+            client=None,
+            attachments=[],
+        ),
+        started_at=time.perf_counter() - 30,
+    )
+    assert response.errors[0]["code"] == "timeout"
+    assert response.errors[0]["message"] == "Request processing timed out"
 
 
 @pytest.mark.asyncio

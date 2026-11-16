@@ -2,14 +2,18 @@
 
 import asyncio
 import io
+import logging
 import zipfile
 from xml.etree import ElementTree as ET
 
 from defusedxml.ElementTree import fromstring as safe_fromstring
 
-from app.core.security import sanitize_for_llm
+from app.core.errors import ARCHIVE_TOO_LARGE, EXTRACTION_FAILED, INVALID_ARCHIVE
+from app.core.security import UnsafeArchiveError, assert_zip_archive_safe, sanitize_for_llm
 from app.parsers.base import BaseParser, ParseResult, ParserKind
 from app.parsers.documents import LegacyConversionAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class VisioParser(BaseParser):
@@ -38,30 +42,39 @@ class VisioParser(BaseParser):
                 metadata=meta,
                 source_ref=filename,
             )
-        except Exception as exc:
+        except UnsafeArchiveError:
             return ParseResult(
                 filename=filename,
                 parser="vsdx",
                 status="failed",
-                error=str(exc),
+                error=ARCHIVE_TOO_LARGE,
+            )
+        except ValueError:
+            return ParseResult(
+                filename=filename,
+                parser="vsdx",
+                status="failed",
+                error=INVALID_ARCHIVE,
+            )
+        except Exception:
+            logger.exception("VSDX extraction failed for %s", filename)
+            return ParseResult(
+                filename=filename,
+                parser="vsdx",
+                status="failed",
+                error=EXTRACTION_FAILED,
             )
 
 
 def _parse_vsdx(data: bytes) -> tuple[str, dict]:
     """Blocking VSDX XML extraction executed in a worker thread."""
-    if not zipfile.is_zipfile(io.BytesIO(data)):
-        raise ValueError("Invalid VSDX: not a ZIP archive")
+    assert_zip_archive_safe(data)
 
     shapes: list[str] = []
     connectors: list[str] = []
     pages: list[str] = []
 
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
-        # Guard against zip bombs
-        total_uncompressed = sum(i.file_size for i in zf.infolist())
-        if total_uncompressed > 100 * 1024 * 1024:
-            raise ValueError("VSDX exceeds safe decompression limit")
-
         for name in zf.namelist():
             if name.startswith("visio/pages/page") and name.endswith(".xml"):
                 pages.append(name)

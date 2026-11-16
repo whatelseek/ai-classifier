@@ -7,7 +7,13 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from app.core.security import sanitize_for_llm
+from app.core.errors import ARCHIVE_TOO_LARGE, EXTRACTION_FAILED, INVALID_ARCHIVE
+from app.core.security import (
+    ZIP_EXTENSIONS,
+    UnsafeArchiveError,
+    assert_zip_archive_safe,
+    sanitize_for_llm,
+)
 from app.parsers.base import BaseParser, ParseResult, ParserKind
 
 logger = logging.getLogger(__name__)
@@ -27,6 +33,16 @@ class DoclingDocumentParser(BaseParser):
         if ext in LEGACY_EXTENSIONS:
             return await LegacyConversionAdapter().parse(filename, data, content_type)
 
+        if ext in ZIP_EXTENSIONS:
+            archive_error = _zip_guard_error(data)
+            if archive_error:
+                return ParseResult(
+                    filename=filename,
+                    parser="docling",
+                    status="failed",
+                    error=archive_error,
+                )
+
         try:
             text = await asyncio.to_thread(_docling_extract, filename, data)
             if not text.strip():
@@ -43,13 +59,13 @@ class DoclingDocumentParser(BaseParser):
                 text=sanitize_for_llm(text[:100_000]),
                 source_ref=filename,
             )
-        except Exception as exc:
+        except Exception:
             logger.exception("Docling extraction failed for %s", filename)
             return ParseResult(
                 filename=filename,
                 parser="docling",
                 status="failed",
-                error=str(exc),
+                error=EXTRACTION_FAILED,
             )
 
 
@@ -76,6 +92,15 @@ class SpreadsheetParser(BaseParser):
         ext = Path(filename).suffix.lstrip(".").lower()
         if ext == "xls":
             return await LegacyConversionAdapter().parse(filename, data, content_type)
+        if ext in ZIP_EXTENSIONS:
+            archive_error = _zip_guard_error(data)
+            if archive_error:
+                return ParseResult(
+                    filename=filename,
+                    parser="openpyxl",
+                    status="failed",
+                    error=archive_error,
+                )
         try:
             text = await asyncio.to_thread(_openpyxl_extract, data)
             return ParseResult(
@@ -85,13 +110,34 @@ class SpreadsheetParser(BaseParser):
                 text=sanitize_for_llm(text),
                 source_ref=filename,
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("Spreadsheet extraction failed for %s", filename)
             return ParseResult(
                 filename=filename,
                 parser="openpyxl",
                 status="failed",
-                error=str(exc),
+                error=EXTRACTION_FAILED,
             )
+
+
+def _zip_guard_error(data: bytes) -> str | None:
+    """Return a client-safe message when a ZIP payload is unsafe.
+
+    Args:
+        data: Raw upload bytes.
+
+    Returns:
+        A stable error string, or ``None`` when the archive is within limits.
+    """
+    try:
+        assert_zip_archive_safe(data)
+    except UnsafeArchiveError:
+        logger.warning("Rejected archive that exceeds the decompression limit")
+        return ARCHIVE_TOO_LARGE
+    except ValueError:
+        logger.warning("Rejected upload that is not a valid ZIP archive")
+        return INVALID_ARCHIVE
+    return None
 
 
 def _openpyxl_extract(data: bytes) -> str:

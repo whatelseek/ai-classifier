@@ -6,9 +6,14 @@ from langgraph.types import Send
 
 from app.core.config import get_settings
 from app.graph.state import AgentState
+from app.parsers.registry import category_for_filename
 
 RouteAfterValidate = Literal["detect_attachments", "return_validation_error"]
 RouteAfterConfidence = Literal["format_response", "retry_classification", "needs_review_path"]
+
+_DOCUMENT_CATEGORIES = frozenset(
+    {"document", "presentation", "spreadsheet", "text", "structured"}
+)
 
 
 def route_after_validate(state: AgentState) -> RouteAfterValidate:
@@ -25,32 +30,76 @@ def route_after_validate(state: AgentState) -> RouteAfterValidate:
     return "detect_attachments"
 
 
-def fan_out_processing(state: AgentState) -> list[Send]:
-    """Fan out to parallel attachment branches using LangGraph ``Send``.
-
-    Skips branches that have no matching content. When nothing needs
-    extraction, sends directly to ``merge_context``.
+def branch_node_for_filename(filename: str) -> str | None:
+    """Map one attachment to the extraction node that should parse it.
 
     Args:
-        state: Current graph state including ``branches`` flags.
+        filename: Upload filename.
+
+    Returns:
+        Node name, or ``None`` when the extension has no parser.
+    """
+    category = category_for_filename(filename)
+    if category == "image":
+        return "process_images"
+    if category == "diagram":
+        return "process_diagrams"
+    if category in _DOCUMENT_CATEGORIES:
+        return "process_documents"
+    return None
+
+
+def fan_out_processing(state: AgentState) -> list[Send]:
+    """Fan out one ``Send`` per attachment, plus the description branch.
+
+    Each worker receives only its own attachment so a failure can be retried
+    without re-parsing siblings. ``max_concurrency`` on invoke caps how many
+    of those workers run at once. When nothing needs extraction, sends
+    directly to ``merge_context``.
+
+    Args:
+        state: Current graph state including description and attachments.
 
     Returns:
         List of ``Send`` commands targeting process_* or merge nodes.
     """
-    branches = state.get("branches") or {}
     sends: list[Send] = []
-    if branches.get("text"):
-        sends.append(Send("process_text", state))
-    if branches.get("docs"):
-        sends.append(Send("process_documents", state))
-    if branches.get("images"):
-        sends.append(Send("process_images", state))
-    if branches.get("diagrams"):
-        sends.append(Send("process_diagrams", state))
+    if (state.get("description") or "").strip():
+        sends.append(Send("process_text", _worker_state(state, [])))
+
+    for attachment in state.get("attachments") or []:
+        target = branch_node_for_filename(attachment["filename"])
+        if target is None:
+            continue
+        sends.append(Send(target, _worker_state(state, [attachment])))
+
     if not sends:
-        sends.append(Send("merge_context", state))
-        return sends
+        sends.append(Send("merge_context", _worker_state(state, [])))
     return sends
+
+
+def _worker_state(state: AgentState, attachments: list) -> dict:
+    """Build the input view for one fan-out worker.
+
+    Reducer channels are omitted so the worker input is not applied as a
+    parent-state write. Nodes return only the chunks they produce.
+
+    Args:
+        state: Parent graph state.
+        attachments: Attachments owned by this worker.
+
+    Returns:
+        Mapping passed as the ``Send`` argument.
+    """
+    return {
+        "request_id": state.get("request_id", ""),
+        "issue_key": state.get("issue_key"),
+        "client": state.get("client"),
+        "description": state.get("description") or "",
+        "attachments": attachments,
+        "retry_count": state.get("retry_count", 0),
+        "status": state.get("status", "pending"),
+    }
 
 
 def route_after_fanout(state: AgentState) -> Literal["merge_context"]:
@@ -82,6 +131,11 @@ def route_after_confidence(state: AgentState) -> RouteAfterConfidence:
     func = classification.get("function")
 
     if status == "failed":
+        return "format_response"
+
+    if status == "retry":
+        if retry_count < settings.max_classification_retries:
+            return "retry_classification"
         return "format_response"
 
     if status == "needs_review" or func == "needs_review":

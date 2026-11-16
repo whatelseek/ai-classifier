@@ -1,11 +1,22 @@
 """HTTP route handlers for health, readiness, and ticket classification."""
 
+import time
+import uuid
+
+import anyio
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
 from app.api.dependencies import get_app_settings, get_request_semaphore
 from app.core.config import Settings
+from app.core.errors import REQUEST_TIMEOUT
 from app.models.requests import ClassifyRequestPayload, UploadedAttachment
-from app.models.responses import ClassifyResponse, FunctionsListResponse, build_functions_response
+from app.models.responses import (
+    ClassifyResponse,
+    FunctionsListResponse,
+    ProcessingMeta,
+    ResponseStatus,
+    build_functions_response,
+)
 from app.services.classifier import ClassificationService
 
 router = APIRouter()
@@ -58,8 +69,9 @@ async def classify_ticket(
 ) -> ClassifyResponse:
     """Classify a ticket from multipart form text and optional file attachments.
 
-    At least one of ``description`` or ``files`` must be provided. Requests are
-    bounded by a concurrency semaphore and the service-level timeout.
+    At least one of ``description`` or ``files`` must be provided. The request
+    deadline starts before the concurrency semaphore, so queue wait counts
+    toward ``REQUEST_TIMEOUT_SECONDS``.
 
     Args:
         description: Free-text ticket body.
@@ -72,26 +84,38 @@ async def classify_ticket(
     Returns:
         Structured classification result, per-attachment statuses, and metadata.
     """
-    async with semaphore:
-        attachments: list[UploadedAttachment] = []
-        for upload in files:
-            if upload.filename is None:
-                continue
-            data = await upload.read()
-            attachments.append(
-                UploadedAttachment(
-                    filename=upload.filename,
-                    content_type=upload.content_type,
-                    data=data,
-                    size=len(data),
-                )
-            )
+    started = time.perf_counter()
+    try:
+        with anyio.fail_after(settings.request_timeout_seconds):
+            async with semaphore:
+                attachments: list[UploadedAttachment] = []
+                for upload in files:
+                    if upload.filename is None:
+                        continue
+                    data = await upload.read()
+                    attachments.append(
+                        UploadedAttachment(
+                            filename=upload.filename,
+                            content_type=upload.content_type,
+                            data=data,
+                            size=len(data),
+                        )
+                    )
 
-        payload = ClassifyRequestPayload(
-            description=description,
-            issue_key=issue_key,
-            client=client,
-            attachments=attachments,
+                payload = ClassifyRequestPayload(
+                    description=description,
+                    issue_key=issue_key,
+                    client=client,
+                    attachments=attachments,
+                )
+                service = ClassificationService(settings)
+                return await service.classify(payload, started_at=started)
+    except TimeoutError:
+        return ClassifyResponse(
+            request_id=f"req-{uuid.uuid4().hex[:12]}",
+            status=ResponseStatus.failed,
+            errors=[{"code": "timeout", "message": REQUEST_TIMEOUT}],
+            processing=ProcessingMeta(
+                duration_ms=int((time.perf_counter() - started) * 1000),
+            ),
         )
-        service = ClassificationService(settings)
-        return await service.classify(payload)
