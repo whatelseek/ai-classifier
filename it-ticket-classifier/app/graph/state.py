@@ -4,6 +4,41 @@ import operator
 from typing import Annotated, Any, NotRequired, TypedDict
 
 
+def add_llm_calls(left: int, right: int) -> int:
+    """Sum LLM call counts written by parallel nodes.
+
+    Args:
+        left: Calls accumulated so far.
+        right: Calls reported by the latest node.
+
+    Returns:
+        Combined call count.
+    """
+    return int(left or 0) + int(right or 0)
+
+
+def merge_token_usage(
+    left: dict[str, int] | None,
+    right: dict[str, int] | None,
+) -> dict[str, int]:
+    """Add token counters from parallel nodes.
+
+    Args:
+        left: Usage accumulated so far.
+        right: Usage reported by the latest node.
+
+    Returns:
+        Combined input, output, and total token counts.
+    """
+    merged = {"input": 0, "output": 0, "total": 0}
+    for source in (left, right):
+        if not source:
+            continue
+        for key in merged:
+            merged[key] += int(source.get(key, 0) or 0)
+    return merged
+
+
 class AttachmentMeta(TypedDict):
     """Metadata for a persisted attachment on disk.
 
@@ -46,7 +81,8 @@ class AgentState(TypedDict):
     """Shared state passed between LangGraph nodes.
 
     List fields annotated with ``operator.add`` merge partial updates from
-    parallel attachment branches.
+    parallel attachment branches. ``llm_calls`` and ``token_usage`` use sum
+    reducers so parallel vision calls keep their token counts.
     """
 
     request_id: str
@@ -64,5 +100,6 @@ class AgentState(TypedDict):
     errors: Annotated[list[dict[str, str]], operator.add]
     processing: NotRequired[dict[str, Any]]
     branches: NotRequired[dict[str, bool]]
-    llm_calls: NotRequired[int]
-    token_usage: NotRequired[dict[str, int]]
+    retry_feedback: NotRequired[str]
+    llm_calls: Annotated[int, add_llm_calls]
+    token_usage: Annotated[dict[str, int], merge_token_usage]

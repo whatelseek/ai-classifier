@@ -3,14 +3,17 @@
 from functools import lru_cache
 
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import RetryPolicy
 
+from app.core.config import get_settings
+from app.graph.context import GraphContext
 from app.graph.edges import (
     fan_out_processing,
     mark_needs_review,
     route_after_confidence,
     route_after_validate,
 )
-from app.graph.nodes.classify import classify_function
+from app.graph.nodes.classify import classification_error_handler, classify_function
 from app.graph.nodes.detect_files import detect_attachments
 from app.graph.nodes.evaluate import (
     evaluate_confidence,
@@ -19,6 +22,7 @@ from app.graph.nodes.evaluate import (
     return_validation_error,
 )
 from app.graph.nodes.extract import (
+    extraction_error_handler,
     process_diagrams,
     process_documents,
     process_images,
@@ -27,6 +31,33 @@ from app.graph.nodes.extract import (
 from app.graph.nodes.merge import merge_context
 from app.graph.nodes.validate import validate_request
 from app.graph.state import AgentState
+from app.llm.client import is_transient_llm_error
+
+_FAN_OUT_TARGETS = [
+    "process_text",
+    "process_documents",
+    "process_images",
+    "process_diagrams",
+    "merge_context",
+]
+
+
+def _llm_retry_policy() -> RetryPolicy:
+    """Build the retry policy for nodes that call the Responses API.
+
+    Returns:
+        Policy that retries connection, timeout, rate-limit, and 5xx errors.
+        ``OPENAI_MAX_RETRIES`` is the number of retries after the first attempt.
+    """
+    settings = get_settings()
+    return RetryPolicy(
+        max_attempts=max(1, settings.openai_max_retries + 1),
+        initial_interval=0.5,
+        backoff_factor=2.0,
+        max_interval=8.0,
+        jitter=False,
+        retry_on=is_transient_llm_error,
+    )
 
 
 def build_classification_graph():
@@ -35,17 +66,30 @@ def build_classification_graph():
     Returns:
         Compiled graph implementing validate → extract → classify → evaluate.
     """
-    graph = StateGraph(AgentState)
+    settings = get_settings()
+    graph = StateGraph(AgentState, context_schema=GraphContext)
+    llm_retry = _llm_retry_policy()
 
     graph.add_node("validate_request", validate_request)
     graph.add_node("return_validation_error", return_validation_error)
     graph.add_node("detect_attachments", detect_attachments)
     graph.add_node("process_text", process_text)
-    graph.add_node("process_documents", process_documents)
-    graph.add_node("process_images", process_images)
-    graph.add_node("process_diagrams", process_diagrams)
+    graph.add_node("process_documents", process_documents, error_handler=extraction_error_handler)
+    graph.add_node(
+        "process_images",
+        process_images,
+        retry_policy=llm_retry,
+        error_handler=extraction_error_handler,
+    )
+    graph.add_node("process_diagrams", process_diagrams, error_handler=extraction_error_handler)
     graph.add_node("merge_context", merge_context)
-    graph.add_node("classify_function", classify_function)
+    graph.add_node(
+        "classify_function",
+        classify_function,
+        retry_policy=llm_retry,
+        timeout=settings.openai_timeout_seconds,
+        error_handler=classification_error_handler,
+    )
     graph.add_node("evaluate_confidence", evaluate_confidence)
     graph.add_node("retry_classification", retry_classification)
     graph.add_node("needs_review", mark_needs_review)
@@ -62,7 +106,7 @@ def build_classification_graph():
     )
     graph.add_edge("return_validation_error", END)
 
-    graph.add_conditional_edges("detect_attachments", fan_out_processing)
+    graph.add_conditional_edges("detect_attachments", fan_out_processing, _FAN_OUT_TARGETS)
 
     for node in ("process_text", "process_documents", "process_images", "process_diagrams"):
         graph.add_edge(node, "merge_context")

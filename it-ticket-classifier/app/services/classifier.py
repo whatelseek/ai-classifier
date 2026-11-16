@@ -8,9 +8,12 @@ from pathlib import Path
 import anyio
 
 from app.core.config import Settings, get_settings
+from app.core.errors import INTERNAL_ERROR, REQUEST_TIMEOUT
 from app.core.logging import request_id_var
 from app.core.security import validate_extension, verify_file_signature
 from app.graph.builder import get_graph
+from app.graph.context import GraphContext
+from app.llm.client import OpenAIClassificationClient
 from app.models.requests import ClassifyRequestPayload, UploadedAttachment
 from app.models.responses import (
     AttachmentStatusItem,
@@ -26,27 +29,42 @@ logger = logging.getLogger(__name__)
 class ClassificationService:
     """Runs the end-to-end classification pipeline for one ticket payload."""
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        llm_client: OpenAIClassificationClient | None = None,
+    ) -> None:
         """Initialize the service with settings and a compiled graph.
 
         Args:
             settings: Optional settings override; defaults to global settings.
+            llm_client: Optional shared client. Tests inject a fake here.
         """
         self._settings = settings or get_settings()
         self._graph = get_graph()
+        self._llm = llm_client or OpenAIClassificationClient(self._settings)
 
-    async def classify(self, payload: ClassifyRequestPayload) -> ClassifyResponse:
+    async def classify(
+        self,
+        payload: ClassifyRequestPayload,
+        started_at: float | None = None,
+    ) -> ClassifyResponse:
         """Validate input, invoke LangGraph, and map state to a REST response.
+
+        ``started_at`` is the moment the HTTP handler accepted the request, so
+        time spent waiting for the concurrency semaphore counts toward
+        ``REQUEST_TIMEOUT_SECONDS``.
 
         Args:
             payload: Normalized ticket description and attachments.
+            started_at: Optional ``perf_counter`` timestamp from request start.
 
         Returns:
             ClassifyResponse with status, classification, and attachment details.
         """
         request_id = f"req-{uuid.uuid4().hex[:12]}"
         token = request_id_var.set(request_id)
-        start = time.perf_counter()
+        start = started_at if started_at is not None else time.perf_counter()
         temp_paths: list[Path] = []
 
         try:
@@ -74,16 +92,26 @@ class ClassificationService:
                 "retry_count": 0,
                 "status": "pending",
                 "errors": [],
+                "llm_calls": 0,
+                "token_usage": {"input": 0, "output": 0, "total": 0},
                 "processing": {
                     "model": self._settings.openai_text_model
-                    if self._settings.openai_configured
+                    if self._llm.is_available
                     else "heuristic",
                     "llm_calls": 0,
                 },
             }
 
-            with anyio.fail_after(self._settings.request_timeout_seconds):
-                final_state = await self._graph.ainvoke(initial_state)
+            remaining = self._settings.request_timeout_seconds - (time.perf_counter() - start)
+            if remaining <= 0:
+                raise TimeoutError
+            context: GraphContext = {"llm_client": self._llm}
+            with anyio.fail_after(remaining):
+                final_state = await self._graph.ainvoke(
+                    initial_state,
+                    config={"max_concurrency": self._settings.max_concurrent_extraction},
+                    context=context,
+                )
 
             return self._build_response(request_id, final_state, start)
         except TimeoutError:
@@ -91,15 +119,15 @@ class ClassificationService:
             return ClassifyResponse(
                 request_id=request_id,
                 status=ResponseStatus.failed,
-                errors=[{"code": "timeout", "message": "Request processing timed out"}],
+                errors=[{"code": "timeout", "message": REQUEST_TIMEOUT}],
                 processing=ProcessingMeta(duration_ms=_duration_ms(start)),
             )
-        except Exception as exc:
+        except Exception:
             logger.exception("Classification pipeline failed")
             return ClassifyResponse(
                 request_id=request_id,
                 status=ResponseStatus.failed,
-                errors=[{"code": "internal_error", "message": str(exc)}],
+                errors=[{"code": "internal_error", "message": INTERNAL_ERROR}],
                 processing=ProcessingMeta(duration_ms=_duration_ms(start)),
             )
         finally:

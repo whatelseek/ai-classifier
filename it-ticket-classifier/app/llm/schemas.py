@@ -27,7 +27,7 @@ class LLMClassificationOutput(BaseModel):
         evidence: Phrases supporting the decision.
     """
 
-    function: SupportFunctionLiteral | Literal["needs_review"]
+    function: Literal["network", "linux", "security", "database", "needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1, max_length=2000)
     alternatives: list[LLMAlternative] = Field(default_factory=list)
@@ -73,4 +73,18 @@ class LLMClassificationOutput(BaseModel):
         return v
 
 
-CLASSIFICATION_JSON_SCHEMA = LLMClassificationOutput.model_json_schema()
+def _strict_classification_schema() -> dict:
+    """Build an OpenAI strict-mode JSON schema for classification output.
+
+    Returns:
+        Schema with ``additionalProperties`` false and every property required.
+    """
+    from openai.lib._pydantic import to_strict_json_schema
+
+    schema = to_strict_json_schema(LLMClassificationOutput)
+    if not isinstance(schema, dict):
+        raise TypeError("Strict classification schema must be a JSON object")
+    return schema
+
+
+CLASSIFICATION_JSON_SCHEMA = _strict_classification_schema()

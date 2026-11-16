@@ -1,6 +1,8 @@
 """Upload validation, file signatures, and redaction before LLM submission."""
 
+import io
 import re
+import zipfile
 from pathlib import Path
 
 # Magic bytes for common formats (partial verification)
@@ -38,6 +40,15 @@ EXTENSION_TO_CATEGORY: dict[str, str] = {
 }
 
 ALLOWED_EXTENSIONS = frozenset(EXTENSION_TO_CATEGORY.keys())
+
+# Office and Visio packages are ZIP archives. Reject declared uncompressed
+# sizes above this limit before any parser inflates the payload.
+MAX_ZIP_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
+ZIP_EXTENSIONS = frozenset({"docx", "xlsx", "pptx", "vsdx"})
+
+
+class UnsafeArchiveError(ValueError):
+    """Raised when a ZIP payload declares an unsafe uncompressed size."""
 
 SECRET_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -138,6 +149,33 @@ def mask_infrastructure(text: str, mask_hosts: bool = True) -> str:
     if not mask_hosts:
         return text
     return INTERNAL_HOST_PATTERN.sub("[REDACTED_IP]", text)
+
+
+def assert_zip_archive_safe(
+    data: bytes, *, limit: int = MAX_ZIP_UNCOMPRESSED_BYTES
+) -> None:
+    """Reject ZIP payloads whose declared uncompressed size exceeds ``limit``.
+
+    The check reads the central directory only. It does not inflate entries.
+
+    Args:
+        data: Raw archive bytes.
+        limit: Maximum total declared uncompressed size in bytes.
+
+    Raises:
+        ValueError: When ``data`` is not a ZIP archive.
+        UnsafeArchiveError: When the declared uncompressed size exceeds ``limit``.
+    """
+    buffer = io.BytesIO(data)
+    if not zipfile.is_zipfile(buffer):
+        raise ValueError("File is not a valid ZIP archive")
+    buffer.seek(0)
+    with zipfile.ZipFile(buffer) as archive:
+        total = sum(info.file_size for info in archive.infolist())
+    if total > limit:
+        raise UnsafeArchiveError(
+            f"Archive uncompressed size {total} exceeds limit {limit}"
+        )
 
 
 def sanitize_for_llm(text: str, mask_hosts: bool = True) -> str:

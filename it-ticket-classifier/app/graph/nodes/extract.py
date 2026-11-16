@@ -2,16 +2,21 @@
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
-from app.core.config import get_settings
+from langgraph.errors import NodeError
+from langgraph.runtime import Runtime
+
+from app.core.errors import EXTRACTION_FAILED
 from app.core.security import sanitize_for_llm
+from app.graph.context import GraphContext, llm_from_runtime
 from app.graph.state import AgentState, ExtractedChunk
+from app.graph.telemetry import log_node
 from app.llm.client import LLMUsageTracker, OpenAIClassificationClient
 from app.parsers.registry import category_for_filename, select_parser
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 async def _read_attachment(path: str) -> bytes:
@@ -21,15 +26,20 @@ async def _read_attachment(path: str) -> bytes:
 
 async def _process_attachment_list(
     state: AgentState,
+    runtime: Runtime[GraphContext],
     *,
     branch: str,
     categories: set[str],
     extensions: set[str] | None = None,
 ) -> dict:
-    """Parse all attachments matching category or extension filters in parallel.
+    """Parse attachments matching category or extension filters.
+
+    Fan-out sends one attachment per invocation. Several invocations of the
+    same node still run concurrently, bounded by ``max_concurrency``.
 
     Args:
         state: Graph state with attachment metadata.
+        runtime: Runtime context carrying the shared LLM client.
         branch: Branch name recorded on each extracted chunk.
         categories: Allowed ``EXTENSION_TO_CATEGORY`` values.
         extensions: When set, restrict to these file extensions.
@@ -37,7 +47,8 @@ async def _process_attachment_list(
     Returns:
         Partial state with ``extracted_content`` and ``attachment_statuses``.
     """
-    llm = OpenAIClassificationClient(settings)
+    started = time.perf_counter()
+    llm = llm_from_runtime(runtime)
     usage = LLMUsageTracker()
     tasks: list = []
     metas: list[tuple[str, str]] = []
@@ -82,6 +93,14 @@ async def _process_attachment_list(
     if usage.llm_calls:
         partial["llm_calls"] = usage.llm_calls
         partial["token_usage"] = usage.token_usage
+    log_node(
+        logger,
+        branch,
+        started,
+        files=len(statuses),
+        failed=sum(1 for item in statuses if item["status"] != "processed"),
+        llm_calls=usage.llm_calls,
+    )
     return partial
 
 
@@ -101,10 +120,47 @@ async def _parse_one(att: dict, llm: OpenAIClassificationClient, usage: LLMUsage
     return await parser.parse(att["filename"], data, att.get("content_type"))
 
 
+def extraction_error_handler(state: AgentState, error: NodeError) -> dict:
+    """Convert an extraction-node failure into a per-file status.
+
+    Args:
+        state: Worker state. Fan-out puts a single attachment here.
+        error: Node failure context. The exception text is logged, not returned.
+
+    Returns:
+        Partial update with a failed attachment status.
+    """
+    logger.error("Extraction node %s failed", error.node, exc_info=error.error)
+    attachments = state.get("attachments") or []
+    filename = attachments[0]["filename"] if attachments else error.node
+    return {
+        "attachment_statuses": [
+            {
+                "filename": filename,
+                "status": "failed",
+                "parser": error.node,
+                "error": EXTRACTION_FAILED,
+            }
+        ],
+        "extracted_content": [
+            {
+                "filename": filename,
+                "parser": error.node,
+                "status": "failed",
+                "text": "",
+                "source_ref": filename,
+                "branch": error.node,
+            }
+        ],
+    }
+
+
 async def process_text(state: AgentState) -> dict:
     """Add the ticket description as an extracted text chunk."""
+    started = time.perf_counter()
     desc = (state.get("description") or "").strip()
     if not desc:
+        log_node(logger, "process_text", started, files=0)
         return {}
     text = sanitize_for_llm(desc)
     chunk: ExtractedChunk = {
@@ -115,33 +171,37 @@ async def process_text(state: AgentState) -> dict:
         "source_ref": "description",
         "branch": "text",
     }
+    log_node(logger, "process_text", started, files=1)
     return {"extracted_content": [chunk]}
 
 
-async def process_documents(state: AgentState) -> dict:
+async def process_documents(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
     """Extract office documents, spreadsheets, and plain structured text files."""
     return await _process_attachment_list(
         state,
+        runtime,
         branch="docs",
         categories={"document", "presentation", "spreadsheet", "text", "structured"},
         extensions=None,
     )
 
 
-async def process_images(state: AgentState) -> dict:
+async def process_images(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
     """Extract technical context from raster screenshots via vision models."""
     return await _process_attachment_list(
         state,
+        runtime,
         branch="images",
         categories={"image"},
         extensions={"png", "jpg", "jpeg", "webp"},
     )
 
 
-async def process_diagrams(state: AgentState) -> dict:
+async def process_diagrams(state: AgentState, runtime: Runtime[GraphContext]) -> dict:
     """Extract Visio diagram elements and relationships."""
     return await _process_attachment_list(
         state,
+        runtime,
         branch="diagrams",
         categories={"diagram"},
         extensions={"vsdx", "vsd"},

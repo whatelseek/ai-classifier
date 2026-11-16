@@ -1,13 +1,20 @@
 """Raster image parser using vision-capable LLMs."""
 
+import logging
+
 from app.core.config import get_settings
-from app.llm.client import LLMUsageTracker, OpenAIClassificationClient
+from app.core.errors import EXTRACTION_FAILED
+from app.core.security import sanitize_for_llm
+from app.llm.client import LLMUsageTracker, OpenAIClassificationClient, is_transient_llm_error
 from app.parsers.base import BaseParser, ParseResult, ParserKind
+
+logger = logging.getLogger(__name__)
 
 VISION_PROMPT = (
     "Extract technical details from this IT support screenshot or diagram image. "
     "Include visible error messages, hostnames, service names, and infrastructure hints. "
-    "Do not invent content. Output plain text bullet points."
+    "Do not invent content. Do not transcribe passwords, API keys, tokens, or private keys. "
+    "Output plain text bullet points."
 )
 
 MEDIA_TYPES = {
@@ -47,7 +54,7 @@ class ImageParser(BaseParser):
 
         usage = self._usage or LLMUsageTracker()
         try:
-            text = await self._llm.analyze_image(data, media, VISION_PROMPT, usage)
+            text = sanitize_for_llm(await self._llm.analyze_image(data, media, VISION_PROMPT, usage))
             if not text.strip():
                 return ParseResult(
                     filename=filename,
@@ -63,9 +70,12 @@ class ImageParser(BaseParser):
                 source_ref=filename,
             )
         except Exception as exc:
+            if is_transient_llm_error(exc):
+                raise
+            logger.exception("Vision analysis failed for %s", filename)
             return ParseResult(
                 filename=filename,
                 parser="openai_vision",
                 status="failed",
-                error=str(exc),
+                error=EXTRACTION_FAILED,
             )

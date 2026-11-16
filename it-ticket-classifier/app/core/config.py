@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     openai_text_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_TEXT_MODEL")
     openai_vision_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_VISION_MODEL")
     openai_timeout_seconds: int = Field(default=60, alias="OPENAI_TIMEOUT_SECONDS")
+    # Extra attempts after the first model call. LangGraph retries the node;
+    # the OpenAI SDK client is created with max_retries=0.
     openai_max_retries: int = Field(default=2, alias="OPENAI_MAX_RETRIES")
     openai_max_input_tokens: int = Field(default=12000, alias="OPENAI_MAX_INPUT_TOKENS")
 
