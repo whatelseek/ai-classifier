@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     log_json: bool = Field(default=True, alias="LOG_JSON")
     mask_internal_hosts: bool = Field(default=True, alias="MASK_INTERNAL_HOSTS")
     temp_dir: Path = Field(default=Path("/tmp/it-ticket-classifier"), alias="TEMP_DIR")
+    docling_api_url: str | None = Field(default=None, alias="DOCLING_API_URL")
+    docling_timeout_seconds: int = Field(default=120, alias="DOCLING_TIMEOUT_SECONDS")
 
     @property
     def openai_configured(self) -> bool:

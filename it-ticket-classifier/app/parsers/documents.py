@@ -5,8 +5,10 @@ import logging
 import tempfile
 from pathlib import Path
 
+import httpx
 from openpyxl import load_workbook
 
+from app.core.config import get_settings
 from app.core.errors import ARCHIVE_TOO_LARGE, EXTRACTION_FAILED, INVALID_ARCHIVE
 from app.core.security import (
     ZIP_EXTENSIONS,
@@ -44,7 +46,16 @@ class DoclingDocumentParser(BaseParser):
                 )
 
         try:
-            text = await asyncio.to_thread(_docling_extract, filename, data)
+            settings = get_settings()
+            if settings.docling_api_url:
+                text = await _docling_extract_remote(
+                    filename,
+                    data,
+                    settings.docling_api_url,
+                    settings.docling_timeout_seconds,
+                )
+            else:
+                text = await asyncio.to_thread(_docling_extract, filename, data)
             if not text.strip():
                 return ParseResult(
                     filename=filename,
@@ -67,6 +78,21 @@ class DoclingDocumentParser(BaseParser):
                 status="failed",
                 error=EXTRACTION_FAILED,
             )
+
+
+async def _docling_extract_remote(
+    filename: str,
+    data: bytes,
+    base_url: str,
+    timeout_seconds: int,
+) -> str:
+    url = f"{base_url.rstrip('/')}/v1/extract"
+    timeout = httpx.Timeout(timeout_seconds)
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, files={"file": (filename, data)})
+        response.raise_for_status()
+        payload = response.json()
+        return str(payload.get("text", ""))
 
 
 def _docling_extract(filename: str, data: bytes) -> str:
