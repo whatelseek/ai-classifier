@@ -70,6 +70,8 @@ spec:
               value: http://10.70.0.121:8002
             - name: DOCLING_TIMEOUT_SECONDS
               value: "180"
+            - name: OPENAI_TIMEOUT_SECONDS
+              value: "180"
             - name: TEMP_DIR
               value: /data/tmp
           resources:

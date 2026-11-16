@@ -15,7 +15,7 @@ from openai import (
 
 from app.core.config import Settings
 from app.llm.prompts import CLASSIFICATION_SYSTEM_PROMPT, build_classification_user_content
-from app.llm.schemas import LLMClassificationOutput
+from app.llm.schemas import CLASSIFICATION_JSON_SCHEMA, LLMClassificationOutput
 
 logger = logging.getLogger(__name__)
 
@@ -138,16 +138,26 @@ class OpenAIClassificationClient:
         )
 
         if self._use_chat_api:
-            response = await self._client.chat.completions.parse(
+            response = await self._client.chat.completions.create(
                 model=self._settings.openai_text_model,
                 messages=[
                     {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
                     {"role": "user", "content": user_content},
                 ],
-                response_format=LLMClassificationOutput,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "ticket_classification",
+                        "strict": True,
+                        "schema": CLASSIFICATION_JSON_SCHEMA,
+                    },
+                },
             )
             usage.record(response.usage)
-            parsed = response.choices[0].message.parsed
+            raw = (response.choices[0].message.content or "").strip()
+            if not raw:
+                raise TypeError("Empty model response")
+            parsed = LLMClassificationOutput.model_validate_json(raw)
         else:
             response = await self._client.responses.parse(
                 model=self._settings.openai_text_model,
