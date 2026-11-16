@@ -57,8 +57,8 @@ class LLMUsageTracker:
         self.llm_calls += 1
         if usage is None:
             return
-        inp = getattr(usage, "input_tokens", 0) or 0
-        out = getattr(usage, "output_tokens", 0) or 0
+        inp = getattr(usage, "input_tokens", None) or getattr(usage, "prompt_tokens", 0) or 0
+        out = getattr(usage, "output_tokens", None) or getattr(usage, "completion_tokens", 0) or 0
         total = getattr(usage, "total_tokens", inp + out) or (inp + out)
         self.token_usage["input"] += inp
         self.token_usage["output"] += out
@@ -76,14 +76,19 @@ class OpenAIClassificationClient:
         """
         self._settings = settings
         self._client: AsyncOpenAI | None = None
+        self._use_chat_api = settings.uses_openai_compatible_proxy
         if settings.openai_configured:
+            api_key = (settings.openai_api_key or "dummy").strip() or "dummy"
             # Retries are owned by the LangGraph RetryPolicy on LLM nodes so
             # only the failing branch is repeated.
-            self._client = AsyncOpenAI(
-                api_key=settings.openai_api_key,
-                timeout=settings.openai_timeout_seconds,
-                max_retries=0,
-            )
+            kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": settings.openai_timeout_seconds,
+                "max_retries": 0,
+            }
+            if settings.openai_base_url:
+                kwargs["base_url"] = settings.openai_base_url.rstrip("/")
+            self._client = AsyncOpenAI(**kwargs)
 
     @property
     def is_available(self) -> bool:
@@ -132,17 +137,28 @@ class OpenAIClassificationClient:
             max_chars=self._settings.openai_max_input_tokens * 4,
         )
 
-        response = await self._client.responses.parse(
-            model=self._settings.openai_text_model,
-            input=[
-                {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            text_format=LLMClassificationOutput,
-        )
-        usage.record(response.usage)
-
-        parsed = response.output_parsed
+        if self._use_chat_api:
+            response = await self._client.chat.completions.parse(
+                model=self._settings.openai_text_model,
+                messages=[
+                    {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format=LLMClassificationOutput,
+            )
+            usage.record(response.usage)
+            parsed = response.choices[0].message.parsed
+        else:
+            response = await self._client.responses.parse(
+                model=self._settings.openai_text_model,
+                input=[
+                    {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                text_format=LLMClassificationOutput,
+            )
+            usage.record(response.usage)
+            parsed = response.output_parsed
         if not isinstance(parsed, LLMClassificationOutput):
             raise TypeError("Empty model response")
         return parsed
@@ -174,6 +190,21 @@ class OpenAIClassificationClient:
         b64 = base64.standard_b64encode(image_bytes).decode("ascii")
         data_url = f"data:{media_type};base64,{b64}"
 
+        if self._use_chat_api:
+            response = await self._client.chat.completions.create(
+                model=self._settings.openai_vision_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": data_url}},
+                        ],
+                    }
+                ],
+            )
+            usage.record(response.usage)
+            return (response.choices[0].message.content or "").strip()
         response = await self._client.responses.create(
             model=self._settings.openai_vision_model,
             input=[
