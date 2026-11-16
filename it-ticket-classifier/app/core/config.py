@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     openai_text_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_TEXT_MODEL")
     openai_vision_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_VISION_MODEL")
     openai_timeout_seconds: int = Field(default=60, alias="OPENAI_TIMEOUT_SECONDS")
@@ -44,6 +45,13 @@ class Settings(BaseSettings):
     @property
     def openai_configured(self) -> bool:
         return bool(self.openai_api_key and self.openai_api_key.strip())
+
+    @property
+    def prefer_chat_completions(self) -> bool:
+        """OpenRouter and most third-party gateways use /chat/completions, not Responses."""
+        if self.openai_base_url:
+            return True
+        return False
 
 
 @lru_cache

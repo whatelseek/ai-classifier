@@ -1,10 +1,11 @@
 import base64
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
 
 from app.core.config import Settings
 from app.llm.prompts import CLASSIFICATION_SYSTEM_PROMPT, build_classification_user_content
@@ -22,8 +23,8 @@ class LLMUsageTracker:
         self.llm_calls += 1
         if usage is None:
             return
-        inp = getattr(usage, "input_tokens", 0) or 0
-        out = getattr(usage, "output_tokens", 0) or 0
+        inp = getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0) or 0
+        out = getattr(usage, "output_tokens", 0) or getattr(usage, "completion_tokens", 0) or 0
         total = getattr(usage, "total_tokens", inp + out) or (inp + out)
         self.token_usage["input"] += inp
         self.token_usage["output"] += out
@@ -35,11 +36,14 @@ class OpenAIClassificationClient:
         self._settings = settings
         self._client: AsyncOpenAI | None = None
         if settings.openai_configured:
-            self._client = AsyncOpenAI(
-                api_key=settings.openai_api_key,
-                timeout=settings.openai_timeout_seconds,
-                max_retries=settings.openai_max_retries,
-            )
+            kwargs: dict[str, Any] = {
+                "api_key": settings.openai_api_key,
+                "timeout": settings.openai_timeout_seconds,
+                "max_retries": settings.openai_max_retries,
+            }
+            if settings.openai_base_url:
+                kwargs["base_url"] = settings.openai_base_url
+            self._client = AsyncOpenAI(**kwargs)
 
     @property
     def is_available(self) -> bool:
@@ -59,11 +63,21 @@ class OpenAIClassificationClient:
         user_content = build_classification_user_content(
             description, merged_context, client, issue_key
         )
-        # Truncate to approximate token budget (chars / 4 heuristic)
         max_chars = self._settings.openai_max_input_tokens * 4
         if len(user_content) > max_chars:
             user_content = user_content[:max_chars] + "\n...[truncated]"
 
+        if self._settings.prefer_chat_completions:
+            return await self._classify_chat_completions(user_content, usage)
+
+        try:
+            return await self._classify_responses(user_content, usage)
+        except (APIStatusError, AttributeError, ValueError, TypeError) as exc:
+            logger.warning("Responses API unavailable, falling back to chat completions: %s", exc)
+            return await self._classify_chat_completions(user_content, usage)
+
+    async def _classify_responses(self, user_content: str, usage: LLMUsageTracker) -> LLMClassificationOutput:
+        assert self._client
         response = await self._client.responses.create(
             model=self._settings.openai_text_model,
             input=[
@@ -80,12 +94,50 @@ class OpenAIClassificationClient:
             },
         )
         usage.record(response.usage)
-
         text = _extract_output_text(response)
         if not text:
             raise ValueError("Empty model response")
-        data = json.loads(text)
-        return LLMClassificationOutput.model_validate(data)
+        return LLMClassificationOutput.model_validate(json.loads(text))
+
+    async def _classify_chat_completions(
+        self, user_content: str, usage: LLMUsageTracker
+    ) -> LLMClassificationOutput:
+        assert self._client
+        messages = [
+            {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+        formats: list[dict[str, Any] | None] = [
+            {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "ticket_classification",
+                    "schema": CLASSIFICATION_JSON_SCHEMA,
+                    "strict": True,
+                },
+            },
+            {"type": "json_object"},
+            None,
+        ]
+        last_error: Exception | None = None
+        for fmt in formats:
+            try:
+                kwargs: dict[str, Any] = {
+                    "model": self._settings.openai_text_model,
+                    "messages": messages,
+                }
+                if fmt is not None:
+                    kwargs["response_format"] = fmt
+                response = await self._client.chat.completions.create(**kwargs)
+                usage.record(response.usage)
+                text = response.choices[0].message.content or ""
+                if not text.strip():
+                    raise ValueError("Empty model response")
+                return LLMClassificationOutput.model_validate(_parse_json_object(text))
+            except (json.JSONDecodeError, ValueError, TypeError) as exc:
+                last_error = exc
+                logger.warning("Chat completion JSON parse failed (format=%s): %s", fmt, exc)
+        raise last_error or ValueError("Chat classification failed")
 
     async def analyze_image(
         self,
@@ -100,24 +152,64 @@ class OpenAIClassificationClient:
         b64 = base64.standard_b64encode(image_bytes).decode("ascii")
         data_url = f"data:{media_type};base64,{b64}"
 
-        response = await self._client.responses.create(
+        if self._settings.prefer_chat_completions:
+            return await self._vision_chat_completions(data_url, prompt, usage)
+
+        try:
+            response = await self._client.responses.create(
+                model=self._settings.openai_vision_model,
+                input=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": prompt},
+                            {"type": "input_image", "image_url": data_url},
+                        ],
+                    }
+                ],
+            )
+            usage.record(response.usage)
+            return _extract_output_text(response) or ""
+        except (APIStatusError, AttributeError, ValueError, TypeError) as exc:
+            logger.warning("Vision via Responses failed, trying chat completions: %s", exc)
+            return await self._vision_chat_completions(data_url, prompt, usage)
+
+    async def _vision_chat_completions(
+        self, data_url: str, prompt: str, usage: LLMUsageTracker
+    ) -> str:
+        assert self._client
+        response = await self._client.chat.completions.create(
             model=self._settings.openai_vision_model,
-            input=[
+            messages=[
                 {
                     "role": "user",
                     "content": [
-                        {"type": "input_text", "text": prompt},
-                        {"type": "input_image", "image_url": data_url},
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 }
             ],
         )
         usage.record(response.usage)
-        return _extract_output_text(response) or ""
+        return response.choices[0].message.content or ""
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    cleaned = text.strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
+    if fence:
+        cleaned = fence.group(1).strip()
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(cleaned[start : end + 1])
+        raise
 
 
 def _extract_output_text(response: Any) -> str:
-    # Responses API: aggregate output_text or walk output items
     if hasattr(response, "output_text") and response.output_text:
         return str(response.output_text)
     chunks: list[str] = []
