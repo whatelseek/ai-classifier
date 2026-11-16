@@ -34,7 +34,7 @@ def get_llm_client(settings: Settings | None = None) -> OpenAIClassificationClie
         settings: Optional settings override; defaults to global settings.
 
     Returns:
-        Client configured for OpenAI or compatible gateways (e.g. OpenRouter).
+        Client configured for the OpenAI Responses API.
     """
     return OpenAIClassificationClient(settings or get_settings())
 

@@ -20,8 +20,7 @@ class Settings(BaseSettings):
     """Application configuration loaded from environment variables and ``.env``.
 
     Attributes:
-        openai_api_key: API key for OpenAI or OpenAI-compatible providers.
-        openai_base_url: Optional gateway base URL (e.g. OpenRouter).
+        openai_api_key: API key for the OpenAI API.
         openai_text_model: Model ID for text classification.
         openai_vision_model: Model ID for image analysis.
         max_file_size_bytes: Maximum size of a single uploaded attachment.
@@ -36,7 +35,6 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
-    openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     openai_text_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_TEXT_MODEL")
     openai_vision_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_VISION_MODEL")
     openai_timeout_seconds: int = Field(default=60, alias="OPENAI_TIMEOUT_SECONDS")
@@ -60,14 +58,6 @@ class Settings(BaseSettings):
     def openai_configured(self) -> bool:
         """Whether a non-empty API key is present."""
         return bool(self.openai_api_key and self.openai_api_key.strip())
-
-    @property
-    def prefer_chat_completions(self) -> bool:
-        """Whether to use chat completions instead of the Responses API.
-
-        OpenRouter and most third-party gateways expose ``/chat/completions`` only.
-        """
-        return bool(self.openai_base_url)
 
 
 @lru_cache
