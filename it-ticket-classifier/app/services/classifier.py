@@ -1,3 +1,5 @@
+"""Orchestrates validation, temp file handling, and LangGraph execution."""
+
 import logging
 import time
 import uuid
@@ -22,11 +24,26 @@ logger = logging.getLogger(__name__)
 
 
 class ClassificationService:
+    """Runs the end-to-end classification pipeline for one ticket payload."""
+
     def __init__(self, settings: Settings | None = None) -> None:
+        """Initialize the service with settings and a compiled graph.
+
+        Args:
+            settings: Optional settings override; defaults to global settings.
+        """
         self._settings = settings or get_settings()
         self._graph = get_graph()
 
     async def classify(self, payload: ClassifyRequestPayload) -> ClassifyResponse:
+        """Validate input, invoke LangGraph, and map state to a REST response.
+
+        Args:
+            payload: Normalized ticket description and attachments.
+
+        Returns:
+            ClassifyResponse with status, classification, and attachment details.
+        """
         request_id = f"req-{uuid.uuid4().hex[:12]}"
         token = request_id_var.set(request_id)
         start = time.perf_counter()
@@ -90,6 +107,14 @@ class ClassificationService:
             await anyio.to_thread.run_sync(self._cleanup, temp_paths)
 
     def _validate_uploads(self, payload: ClassifyRequestPayload) -> list[dict[str, str]]:
+        """Enforce presence, count, size, extension, and signature rules.
+
+        Args:
+            payload: Incoming classification payload.
+
+        Returns:
+            List of error dicts; empty when validation succeeds.
+        """
         errors: list[dict[str, str]] = []
         if not (payload.description or "").strip() and not payload.attachments:
             errors.append(
@@ -140,6 +165,15 @@ class ClassificationService:
     def _persist_attachments(
         self, attachments: list[UploadedAttachment], temp_paths: list[Path]
     ) -> list[dict]:
+        """Write attachments to disk and build graph attachment metadata.
+
+        Args:
+            attachments: In-memory uploads.
+            temp_paths: Output list mutated with paths for later cleanup.
+
+        Returns:
+            Attachment metadata dicts for LangGraph initial state.
+        """
         from app.parsers.registry import category_for_filename
 
         self._settings.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -160,6 +194,11 @@ class ClassificationService:
         return metas
 
     def _cleanup(self, paths: list[Path]) -> None:
+        """Remove temporary attachment files.
+
+        Args:
+            paths: Absolute paths created during persistence.
+        """
         for path in paths:
             try:
                 path.unlink(missing_ok=True)
@@ -167,6 +206,16 @@ class ClassificationService:
                 logger.warning("Failed to remove temp file", extra={"path": str(path)})
 
     def _build_response(self, request_id: str, state: dict, start: float) -> ClassifyResponse:
+        """Map final LangGraph state into the public API response model.
+
+        Args:
+            request_id: Correlation id for logging.
+            state: Terminal graph state.
+            start: ``perf_counter`` timestamp from request start.
+
+        Returns:
+            Validated ``ClassifyResponse``.
+        """
         status_str = state.get("status", "failed")
         try:
             status = ResponseStatus(status_str)
@@ -205,4 +254,12 @@ class ClassificationService:
 
 
 def _duration_ms(start: float) -> int:
+    """Compute elapsed milliseconds since ``start``.
+
+    Args:
+        start: Value from ``time.perf_counter()``.
+
+    Returns:
+        Rounded duration in milliseconds.
+    """
     return int((time.perf_counter() - start) * 1000)

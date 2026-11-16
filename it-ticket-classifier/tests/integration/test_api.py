@@ -1,3 +1,5 @@
+"""Integration tests for FastAPI endpoints and multipart classification."""
+
 import io
 import zipfile
 

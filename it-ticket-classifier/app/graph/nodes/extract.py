@@ -1,3 +1,5 @@
+"""LangGraph nodes: parallel text, document, image, and diagram extraction."""
+
 import asyncio
 import logging
 from pathlib import Path
@@ -13,6 +15,7 @@ settings = get_settings()
 
 
 async def _read_attachment(path: str) -> bytes:
+    """Load attachment bytes from a temp path without blocking the event loop."""
     return await asyncio.to_thread(Path(path).read_bytes)
 
 
@@ -23,6 +26,17 @@ async def _process_attachment_list(
     categories: set[str],
     extensions: set[str] | None = None,
 ) -> dict:
+    """Parse all attachments matching category or extension filters in parallel.
+
+    Args:
+        state: Graph state with attachment metadata.
+        branch: Branch name recorded on each extracted chunk.
+        categories: Allowed ``EXTENSION_TO_CATEGORY`` values.
+        extensions: When set, restrict to these file extensions.
+
+    Returns:
+        Partial state with ``extracted_content`` and ``attachment_statuses``.
+    """
     llm = OpenAIClassificationClient(settings)
     usage = LLMUsageTracker()
     tasks: list = []
@@ -72,6 +86,7 @@ async def _process_attachment_list(
 
 
 async def _parse_one(att: dict, llm: OpenAIClassificationClient, usage: LLMUsageTracker, branch: str):
+    """Select a parser and run it for one attachment metadata row."""
     parser = select_parser(att["filename"], llm, usage)
     if not parser:
         from app.parsers.base import ParseResult
@@ -87,6 +102,7 @@ async def _parse_one(att: dict, llm: OpenAIClassificationClient, usage: LLMUsage
 
 
 async def process_text(state: AgentState) -> dict:
+    """Add the ticket description as an extracted text chunk."""
     desc = (state.get("description") or "").strip()
     if not desc:
         return {}
@@ -103,6 +119,7 @@ async def process_text(state: AgentState) -> dict:
 
 
 async def process_documents(state: AgentState) -> dict:
+    """Extract office documents, spreadsheets, and plain structured text files."""
     return await _process_attachment_list(
         state,
         branch="docs",
@@ -112,6 +129,7 @@ async def process_documents(state: AgentState) -> dict:
 
 
 async def process_images(state: AgentState) -> dict:
+    """Extract technical context from raster screenshots via vision models."""
     return await _process_attachment_list(
         state,
         branch="images",
@@ -121,6 +139,7 @@ async def process_images(state: AgentState) -> dict:
 
 
 async def process_diagrams(state: AgentState) -> dict:
+    """Extract Visio diagram elements and relationships."""
     return await _process_attachment_list(
         state,
         branch="diagrams",

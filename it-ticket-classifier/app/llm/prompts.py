@@ -1,3 +1,5 @@
+"""System and user prompt templates for ticket classification."""
+
 CLASSIFICATION_SYSTEM_PROMPT = """You are an IT support routing classifier for an enterprise service desk.
 
 Your task is to assign exactly ONE primary IT support function responsible for resolving the ticket.
@@ -30,6 +32,17 @@ def build_classification_user_content(
     client: str | None,
     issue_key: str | None,
 ) -> str:
+    """Assemble the user message with metadata, description, and attachment text.
+
+    Args:
+        description: Ticket narrative.
+        merged_context: Sanitized text merged from parsers.
+        client: Optional client identifier.
+        issue_key: Optional external ticket key.
+
+    Returns:
+        Single string sent as the user turn to the LLM.
+    """
     parts = ["=== Ticket metadata ==="]
     if issue_key:
         parts.append(f"Issue key: {issue_key}")

@@ -1,4 +1,7 @@
-"""Offline evaluation using heuristic classifier (no OpenAI required)."""
+"""Offline evaluation using the heuristic classifier (no OpenAI required).
+
+Computes macro-F1 and confusion matrix statistics on labeled fixtures.
+"""
 
 from __future__ import annotations
 

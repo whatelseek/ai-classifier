@@ -1,9 +1,21 @@
+"""LangGraph node: merge extracted chunks into one LLM context string."""
+
 from app.core.config import get_settings
 from app.core.security import sanitize_for_llm
 from app.graph.state import AgentState
 
 
 def merge_context(state: AgentState) -> dict:
+    """Concatenate successful extraction chunks with source headers.
+
+    Applies redaction and truncates to the configured token budget.
+
+    Args:
+        state: Graph state after parallel extraction branches complete.
+
+    Returns:
+        Partial update containing ``merged_context``.
+    """
     parts: list[str] = []
     for chunk in state.get("extracted_content") or []:
         if chunk.get("status") != "processed":

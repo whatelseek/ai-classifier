@@ -1,3 +1,5 @@
+"""LangGraph StateGraph construction for the classification workflow."""
+
 from functools import lru_cache
 
 from langgraph.graph import END, START, StateGraph
@@ -28,6 +30,11 @@ from app.graph.state import AgentState
 
 
 def build_classification_graph():
+    """Wire nodes, conditional edges, and compile the LangGraph workflow.
+
+    Returns:
+        Compiled graph implementing validate → extract → classify → evaluate.
+    """
     graph = StateGraph(AgentState)
 
     graph.add_node("validate_request", validate_request)
@@ -81,4 +88,9 @@ def build_classification_graph():
 
 @lru_cache
 def get_graph():
+    """Return a cached compiled classification graph.
+
+    Returns:
+        Singleton compiled LangGraph application.
+    """
     return build_classification_graph()

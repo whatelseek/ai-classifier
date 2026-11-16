@@ -1,3 +1,5 @@
+"""Unit tests for LLM structured output schema validation."""
+
 import pytest
 from pydantic import ValidationError
 

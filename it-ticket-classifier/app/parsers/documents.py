@@ -1,3 +1,5 @@
+"""Office and spreadsheet parsers using Docling and openpyxl."""
+
 import asyncio
 import logging
 import tempfile
@@ -15,9 +17,12 @@ LEGACY_EXTENSIONS = frozenset({"doc", "xls", "ppt", "vsd"})
 
 
 class DoclingDocumentParser(BaseParser):
+    """Extracts markdown from PDF and modern Office formats via Docling."""
+
     kind = ParserKind.document
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Run Docling in a worker thread and cap extracted text length."""
         ext = Path(filename).suffix.lstrip(".").lower()
         if ext in LEGACY_EXTENSIONS:
             return await LegacyConversionAdapter().parse(filename, data, content_type)
@@ -49,6 +54,7 @@ class DoclingDocumentParser(BaseParser):
 
 
 def _docling_extract(filename: str, data: bytes) -> str:
+    """Blocking Docling conversion helper executed in ``asyncio.to_thread``."""
     from docling.document_converter import DocumentConverter
 
     ext = Path(filename).suffix
@@ -61,9 +67,12 @@ def _docling_extract(filename: str, data: bytes) -> str:
 
 
 class SpreadsheetParser(BaseParser):
+    """Reads XLSX workbooks with openpyxl."""
+
     kind = ParserKind.spreadsheet
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Extract a bounded preview of sheet rows."""
         ext = Path(filename).suffix.lstrip(".").lower()
         if ext == "xls":
             return await LegacyConversionAdapter().parse(filename, data, content_type)
@@ -102,11 +111,12 @@ def _openpyxl_extract(data: bytes) -> str:
 
 
 class LegacyConversionAdapter(BaseParser):
-    """Reports explicit failure for legacy binaries without unsafe conversion."""
+    """Fails fast for legacy Office/Visio binaries requiring external conversion."""
 
     kind = ParserKind.conversion
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Return an explicit error instructing users to upload modern formats."""
         ext = Path(filename).suffix.lstrip(".").lower()
         return ParseResult(
             filename=filename,

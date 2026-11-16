@@ -1,3 +1,5 @@
+"""Microsoft Visio VSDX diagram extraction from embedded XML."""
+
 import asyncio
 import io
 import zipfile
@@ -11,9 +13,12 @@ from app.parsers.documents import LegacyConversionAdapter
 
 
 class VisioParser(BaseParser):
+    """Parses VSDX OPC packages and extracts shape and connector metadata."""
+
     kind = ParserKind.diagram
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Extract diagram labels and relationships from VSDX XML."""
         if filename.lower().endswith(".vsd"):
             return await LegacyConversionAdapter().parse(filename, data, content_type)
         try:
@@ -43,6 +48,7 @@ class VisioParser(BaseParser):
 
 
 def _parse_vsdx(data: bytes) -> tuple[str, dict]:
+    """Blocking VSDX XML extraction executed in a worker thread."""
     if not zipfile.is_zipfile(io.BytesIO(data)):
         raise ValueError("Invalid VSDX: not a ZIP archive")
 

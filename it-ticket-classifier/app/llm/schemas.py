@@ -1,3 +1,5 @@
+"""Pydantic schemas for LLM structured classification output."""
+
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -8,12 +10,22 @@ SupportFunctionLiteral = Literal["network", "linux", "security", "database"]
 
 
 class LLMAlternative(BaseModel):
+    """Secondary routing candidate returned by the model."""
+
     function: SupportFunctionLiteral
     score: float = Field(ge=0.0, le=1.0)
 
 
 class LLMClassificationOutput(BaseModel):
-    """Structured output schema for OpenAI classification."""
+    """Structured output schema validated after each LLM call.
+
+    Attributes:
+        function: Primary function or ``needs_review``.
+        confidence: Model-reported confidence in ``[0, 1]``.
+        reason: Short natural-language justification.
+        alternatives: Other plausible functions with scores.
+        evidence: Phrases supporting the decision.
+    """
 
     function: SupportFunctionLiteral | Literal["needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
@@ -24,6 +36,17 @@ class LLMClassificationOutput(BaseModel):
     @field_validator("function")
     @classmethod
     def validate_function(cls, v: str) -> str:
+        """Reject function codes outside the configured enumeration.
+
+        Args:
+            v: Raw function string from the model.
+
+        Returns:
+            Validated function code.
+
+        Raises:
+            ValueError: When the function is not allowed.
+        """
         if v == "needs_review":
             return v
         if v not in SUPPORTED_FUNCTIONS:
@@ -33,6 +56,17 @@ class LLMClassificationOutput(BaseModel):
     @field_validator("alternatives")
     @classmethod
     def validate_alternatives(cls, v: list[LLMAlternative]) -> list[LLMAlternative]:
+        """Ensure alternative functions are members of the support enum.
+
+        Args:
+            v: Parsed alternative list.
+
+        Returns:
+            The same list when valid.
+
+        Raises:
+            ValueError: When any alternative uses an unknown function.
+        """
         for alt in v:
             if alt.function not in SUPPORTED_FUNCTIONS:
                 raise ValueError(f"Invalid alternative function: {alt.function}")
