@@ -1,3 +1,5 @@
+"""LangGraph node: validate minimum input requirements."""
+
 import logging
 
 from app.graph.state import AgentState
@@ -6,6 +8,14 @@ logger = logging.getLogger(__name__)
 
 
 def validate_request(state: AgentState) -> dict:
+    """Ensure at least description text or attachments are present.
+
+    Args:
+        state: Incoming graph state before extraction.
+
+    Returns:
+        Partial update with ``validated`` status or validation errors.
+    """
     description = (state.get("description") or "").strip()
     attachments = state.get("attachments") or []
     errors: list[dict[str, str]] = []

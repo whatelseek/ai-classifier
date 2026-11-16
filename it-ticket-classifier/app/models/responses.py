@@ -1,3 +1,5 @@
+"""Pydantic response models for the public REST API."""
+
 from enum import Enum
 from typing import Literal
 
@@ -9,17 +11,23 @@ SupportFunction = Literal["network", "linux", "security", "database"]
 
 
 class ResponseStatus(str, Enum):
+    """Top-level outcome for a classification request."""
+
     classified = "classified"
     needs_review = "needs_review"
     failed = "failed"
 
 
 class AlternativeFunction(BaseModel):
+    """Runner-up support function with a relative score."""
+
     function: SupportFunction
     score: float = Field(ge=0.0, le=1.0)
 
 
 class ClassificationResult(BaseModel):
+    """Model routing decision and explanatory fields."""
+
     function: SupportFunction | Literal["needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str
@@ -28,6 +36,8 @@ class ClassificationResult(BaseModel):
 
 
 class AttachmentStatusItem(BaseModel):
+    """Per-file extraction outcome reported to the client."""
+
     filename: str
     status: Literal["processed", "failed", "skipped"]
     parser: str | None = None
@@ -35,6 +45,8 @@ class AttachmentStatusItem(BaseModel):
 
 
 class ProcessingMeta(BaseModel):
+    """Timing, model id, and token accounting for the request."""
+
     model: str | None = None
     llm_calls: int = 0
     duration_ms: int = 0
@@ -42,6 +54,8 @@ class ProcessingMeta(BaseModel):
 
 
 class ClassifyResponse(BaseModel):
+    """Complete REST response for ``POST /api/v1/classify``."""
+
     request_id: str
     status: ResponseStatus
     classification: ClassificationResult | None = None
@@ -51,12 +65,16 @@ class ClassifyResponse(BaseModel):
 
 
 class FunctionInfo(BaseModel):
+    """One row in the support-function catalog."""
+
     code: str
     name: str
     scope: str
 
 
 class FunctionsListResponse(BaseModel):
+    """Response wrapper for ``GET /api/v1/functions``."""
+
     functions: list[FunctionInfo]
 
 
@@ -69,6 +87,11 @@ FUNCTION_SCOPES: dict[str, str] = {
 
 
 def build_functions_response() -> FunctionsListResponse:
+    """Build the static list of routable IT support functions.
+
+    Returns:
+        FunctionsListResponse containing all configured function codes.
+    """
     from app.core.config import FUNCTION_DISPLAY_NAMES
 
     return FunctionsListResponse(

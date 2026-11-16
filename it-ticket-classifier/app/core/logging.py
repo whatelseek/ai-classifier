@@ -1,3 +1,5 @@
+"""Structured logging configuration and request-scoped correlation IDs."""
+
 import json
 import logging
 import sys
@@ -9,7 +11,17 @@ request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 
 
 class JsonFormatter(logging.Formatter):
+    """Formats log records as single-line JSON objects."""
+
     def format(self, record: logging.LogRecord) -> str:
+        """Serialize a log record to JSON.
+
+        Args:
+            record: Standard library log record.
+
+        Returns:
+            UTF-8 JSON string containing message, level, and optional fields.
+        """
         payload: dict[str, Any] = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(record.created)),
             "level": record.levelname,
@@ -27,6 +39,12 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO", json_logs: bool = True) -> None:
+    """Configure root logging handlers and formatters.
+
+    Args:
+        level: Minimum log level name (e.g. ``INFO``).
+        json_logs: When True, emit JSON lines; otherwise use plain text.
+    """
     root = logging.getLogger()
     root.handlers.clear()
     handler = logging.StreamHandler(sys.stdout)
@@ -41,6 +59,14 @@ def setup_logging(level: str = "INFO", json_logs: bool = True) -> None:
 
 
 def log_extra(logger: logging.Logger, level: int, message: str, **fields: Any) -> None:
+    """Emit a log record with arbitrary structured fields.
+
+    Args:
+        logger: Target logger.
+        level: ``logging`` level constant.
+        message: Human-readable message.
+        **fields: Additional keys merged into the JSON payload.
+    """
     record = logger.makeRecord(logger.name, level, "", 0, message, (), None)
     record.extra_fields = fields  # type: ignore[attr-defined]
     logger.handle(record)

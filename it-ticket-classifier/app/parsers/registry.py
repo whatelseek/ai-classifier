@@ -1,3 +1,5 @@
+"""Parser selection based on filename extension and category."""
+
 from pathlib import Path
 
 from app.core.security import EXTENSION_TO_CATEGORY
@@ -10,6 +12,14 @@ from app.parsers.visio import VisioParser
 
 
 def category_for_filename(filename: str) -> str | None:
+    """Map a filename to a coarse attachment category.
+
+    Args:
+        filename: Upload filename.
+
+    Returns:
+        Category key from ``EXTENSION_TO_CATEGORY`` or ``None``.
+    """
     ext = Path(filename).suffix.lstrip(".").lower()
     return EXTENSION_TO_CATEGORY.get(ext)
 
@@ -19,6 +29,16 @@ def select_parser(
     llm_client: OpenAIClassificationClient,
     usage: LLMUsageTracker,
 ) -> BaseParser | None:
+    """Instantiate the parser appropriate for a filename.
+
+    Args:
+        filename: Upload filename.
+        llm_client: Client used by vision parsers.
+        usage: Token tracker shared across parsers in one request.
+
+    Returns:
+        Parser instance, or ``None`` when the extension is unsupported.
+    """
     ext = Path(filename).suffix.lstrip(".").lower()
     category = EXTENSION_TO_CATEGORY.get(ext)
     if not category:
@@ -46,6 +66,14 @@ def select_parser(
 
 
 def parser_kind_for_file(filename: str) -> ParserKind | None:
+    """Return the parser kind enum for branch detection.
+
+    Args:
+        filename: Upload filename.
+
+    Returns:
+        ``ParserKind`` when known; otherwise ``None``.
+    """
     ext = Path(filename).suffix.lstrip(".").lower()
     category = EXTENSION_TO_CATEGORY.get(ext)
     mapping = {

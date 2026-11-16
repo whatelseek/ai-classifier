@@ -1,3 +1,5 @@
+"""Unit tests for the offline heuristic classification fallback."""
+
 from app.graph.nodes.classify import _heuristic_classify
 
 

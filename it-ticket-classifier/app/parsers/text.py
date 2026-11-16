@@ -1,3 +1,5 @@
+"""Plain text, CSV, and structured text (JSON/XML/YAML) parsers."""
+
 import csv
 import io
 import json
@@ -9,9 +11,12 @@ from app.parsers.base import BaseParser, ParseResult, ParserKind
 
 
 class TextParser(BaseParser):
+    """Decodes UTF-8 log and text files."""
+
     kind = ParserKind.text
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Decode bytes as UTF-8 text with replacement on errors."""
         try:
             text = data.decode("utf-8", errors="replace")
             text = sanitize_for_llm(text)
@@ -32,9 +37,12 @@ class TextParser(BaseParser):
 
 
 class StructuredTextParser(BaseParser):
+    """Parses JSON, YAML, and generic XML-like text."""
+
     kind = ParserKind.structured
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Normalize structured text into a string for the LLM."""
         ext = filename.rsplit(".", 1)[-1].lower()
         try:
             raw = data.decode("utf-8", errors="replace")
@@ -66,9 +74,12 @@ class StructuredTextParser(BaseParser):
 
 
 class CsvParser(BaseParser):
+    """Reads delimiter-separated rows from CSV uploads."""
+
     kind = ParserKind.spreadsheet
 
     async def parse(self, filename: str, data: bytes, content_type: str | None) -> ParseResult:
+        """Parse up to 500 CSV rows into tabular text."""
         try:
             raw = data.decode("utf-8", errors="replace")
             reader = csv.reader(io.StringIO(raw))

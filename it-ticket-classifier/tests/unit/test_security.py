@@ -1,3 +1,5 @@
+"""Unit tests for upload validation and content redaction helpers."""
+
 from app.core.security import (
     mask_secrets,
     sanitize_for_llm,

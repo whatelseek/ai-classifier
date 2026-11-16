@@ -1,3 +1,5 @@
+"""OpenAI / OpenAI-compatible client for classification and vision inference."""
+
 import base64
 import json
 import logging
@@ -16,10 +18,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LLMUsageTracker:
+    """Accumulates per-request LLM call counts and token usage."""
+
     llm_calls: int = 0
     token_usage: dict[str, int] = field(default_factory=lambda: {"input": 0, "output": 0, "total": 0})
 
     def record(self, usage: Any | None) -> None:
+        """Increment counters from an OpenAI usage object.
+
+        Args:
+            usage: Usage block from a Responses or Chat Completions response.
+        """
         self.llm_calls += 1
         if usage is None:
             return
@@ -32,7 +41,14 @@ class LLMUsageTracker:
 
 
 class OpenAIClassificationClient:
+    """Thin wrapper around AsyncOpenAI for structured ticket classification."""
+
     def __init__(self, settings: Settings) -> None:
+        """Create a client when an API key is configured.
+
+        Args:
+            settings: Provider credentials, models, and timeouts.
+        """
         self._settings = settings
         self._client: AsyncOpenAI | None = None
         if settings.openai_configured:
@@ -47,6 +63,7 @@ class OpenAIClassificationClient:
 
     @property
     def is_available(self) -> bool:
+        """Return True when the underlying HTTP client was constructed."""
         return self._client is not None
 
     async def classify(
@@ -57,6 +74,22 @@ class OpenAIClassificationClient:
         issue_key: str | None,
         usage: LLMUsageTracker,
     ) -> LLMClassificationOutput:
+        """Run structured classification over description and merged attachment text.
+
+        Args:
+            description: Ticket body.
+            merged_context: Parsed attachment content.
+            client: Optional client name for the prompt.
+            issue_key: Optional ticket id for the prompt.
+            usage: Mutable tracker updated with token counts.
+
+        Returns:
+            Validated ``LLMClassificationOutput``.
+
+        Raises:
+            RuntimeError: When no API key is configured.
+            ValueError: When the model returns empty or invalid JSON.
+        """
         if not self._client:
             raise RuntimeError("OpenAI API key is not configured")
 
@@ -146,6 +179,17 @@ class OpenAIClassificationClient:
         prompt: str,
         usage: LLMUsageTracker,
     ) -> str:
+        """Extract textual technical details from a screenshot or diagram image.
+
+        Args:
+            image_bytes: Raw image file contents.
+            media_type: MIME type for the data URL.
+            prompt: Vision instruction prompt.
+            usage: Mutable LLM usage tracker.
+
+        Returns:
+            Model-generated plain text summary.
+        """
         if not self._client:
             raise RuntimeError("OpenAI API key is not configured")
 
@@ -195,6 +239,17 @@ class OpenAIClassificationClient:
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
+    """Parse JSON from raw model text, including fenced code blocks.
+
+    Args:
+        text: Model output that should contain a JSON object.
+
+    Returns:
+        Decoded dictionary.
+
+    Raises:
+        json.JSONDecodeError: When no JSON object can be recovered.
+    """
     cleaned = text.strip()
     fence = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned)
     if fence:

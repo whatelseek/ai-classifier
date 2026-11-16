@@ -1,3 +1,5 @@
+"""Upload validation, file signatures, and redaction before LLM submission."""
+
 import re
 from pathlib import Path
 
@@ -52,10 +54,26 @@ INTERNAL_HOST_PATTERN = re.compile(
 
 
 def safe_extension(filename: str) -> str:
+    """Return the normalized lowercase extension without a leading dot.
+
+    Args:
+        filename: Original upload filename.
+
+    Returns:
+        Extension string or empty string when absent.
+    """
     return Path(filename).suffix.lstrip(".").lower()
 
 
 def validate_extension(filename: str) -> str | None:
+    """Check whether the filename extension is allowed.
+
+    Args:
+        filename: Original upload filename.
+
+    Returns:
+        Error message if unsupported; otherwise ``None``.
+    """
     ext = safe_extension(filename)
     if ext not in ALLOWED_EXTENSIONS:
         return f"Unsupported file extension: .{ext or '(none)'}"
@@ -63,7 +81,18 @@ def validate_extension(filename: str) -> str | None:
 
 
 def verify_file_signature(data: bytes, ext: str) -> bool:
-    """Best-effort signature check; text formats have no magic bytes."""
+    """Best-effort magic-byte verification for binary formats.
+
+    Text-like extensions skip signature checks. Legacy Office binaries accept
+    OLE or ZIP headers.
+
+    Args:
+        data: Raw file bytes.
+        ext: Normalized extension.
+
+    Returns:
+        True when the signature matches or the format is exempt.
+    """
     if ext in ("txt", "log", "csv", "json", "xml", "yaml", "yml"):
         return True
     if ext == "pdf":
@@ -76,13 +105,20 @@ def verify_file_signature(data: bytes, ext: str) -> bool:
         return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
     if ext in ("docx", "xlsx", "pptx", "vsdx"):
         return data[:4] == b"PK\x03\x04"
-    # Legacy binary office / visio — allow with PK or OLE header
     if ext in ("doc", "xls", "ppt", "vsd"):
         return data[:4] in (b"PK\x03\x04", b"\xd0\xcf\x11\xe0")
     return len(data) > 0
 
 
 def mask_secrets(text: str) -> str:
+    """Replace detected secrets and credentials with a redaction token.
+
+    Args:
+        text: Raw text that may contain sensitive material.
+
+    Returns:
+        Redacted text safe for external model APIs.
+    """
     masked = text
     for pattern in SECRET_PATTERNS:
         masked = pattern.sub("[REDACTED_SECRET]", masked)
@@ -90,10 +126,28 @@ def mask_secrets(text: str) -> str:
 
 
 def mask_infrastructure(text: str, mask_hosts: bool = True) -> str:
+    """Mask private RFC1918 addresses when policy requires it.
+
+    Args:
+        text: Input text.
+        mask_hosts: When False, return text unchanged.
+
+    Returns:
+        Text with private IPs replaced when masking is enabled.
+    """
     if not mask_hosts:
         return text
     return INTERNAL_HOST_PATTERN.sub("[REDACTED_IP]", text)
 
 
 def sanitize_for_llm(text: str, mask_hosts: bool = True) -> str:
+    """Apply secret and infrastructure masking before LLM prompts.
+
+    Args:
+        text: Extracted or user-provided content.
+        mask_hosts: Whether to mask private IP addresses.
+
+    Returns:
+        Sanitized content.
+    """
     return mask_infrastructure(mask_secrets(text), mask_hosts=mask_hosts)

@@ -1,3 +1,5 @@
+"""Environment-backed configuration and support-function metadata."""
+
 from functools import lru_cache
 from pathlib import Path
 
@@ -15,6 +17,18 @@ FUNCTION_DISPLAY_NAMES: dict[str, str] = {
 
 
 class Settings(BaseSettings):
+    """Application configuration loaded from environment variables and ``.env``.
+
+    Attributes:
+        openai_api_key: API key for OpenAI or OpenAI-compatible providers.
+        openai_base_url: Optional gateway base URL (e.g. OpenRouter).
+        openai_text_model: Model ID for text classification.
+        openai_vision_model: Model ID for image analysis.
+        max_file_size_bytes: Maximum size of a single uploaded attachment.
+        max_total_upload_bytes: Maximum combined upload size per request.
+        request_timeout_seconds: Wall-clock limit for one classification request.
+    """
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -44,16 +58,23 @@ class Settings(BaseSettings):
 
     @property
     def openai_configured(self) -> bool:
+        """Whether a non-empty API key is present."""
         return bool(self.openai_api_key and self.openai_api_key.strip())
 
     @property
     def prefer_chat_completions(self) -> bool:
-        """OpenRouter and most third-party gateways use /chat/completions, not Responses."""
-        if self.openai_base_url:
-            return True
-        return False
+        """Whether to use chat completions instead of the Responses API.
+
+        OpenRouter and most third-party gateways expose ``/chat/completions`` only.
+        """
+        return bool(self.openai_base_url)
 
 
 @lru_cache
 def get_settings() -> Settings:
+    """Return a cached ``Settings`` instance.
+
+    Returns:
+        Process-wide settings singleton.
+    """
     return Settings()

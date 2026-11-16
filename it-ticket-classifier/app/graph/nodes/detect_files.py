@@ -1,8 +1,18 @@
+"""LangGraph node: decide which parallel extraction branches to run."""
+
 from app.graph.state import AgentState
 from app.parsers.registry import category_for_filename, parser_kind_for_file
 
 
 def detect_attachments(state: AgentState) -> dict:
+    """Set branch flags for text, documents, images, and diagrams.
+
+    Args:
+        state: Graph state after validation.
+
+    Returns:
+        Partial update with a ``branches`` dictionary consumed by ``fan_out_processing``.
+    """
     attachments = state.get("attachments") or []
     branches = {
         "text": bool((state.get("description") or "").strip()),

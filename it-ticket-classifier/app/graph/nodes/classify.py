@@ -1,3 +1,5 @@
+"""LangGraph node: LLM or heuristic ticket function classification."""
+
 import logging
 import re
 
@@ -18,6 +20,14 @@ HEURISTIC_RULES: list[tuple[re.Pattern[str], str]] = [
 
 
 async def classify_function(state: AgentState) -> dict:
+    """Invoke the configured LLM or heuristic rules on merged context.
+
+    Args:
+        state: Graph state including description and ``merged_context``.
+
+    Returns:
+        Partial update with ``classification``, ``confidence``, and LLM counters.
+    """
     settings = get_settings()
     client = OpenAIClassificationClient(settings)
     usage = LLMUsageTracker()
@@ -73,6 +83,7 @@ async def classify_function(state: AgentState) -> dict:
 
 
 def _from_llm(result: LLMClassificationOutput) -> dict:
+    """Convert a pydantic LLM payload into plain dict state."""
     return {
         "function": result.function,
         "confidence": result.confidence,
@@ -83,6 +94,15 @@ def _from_llm(result: LLMClassificationOutput) -> dict:
 
 
 def _heuristic_classify(description: str, merged: str) -> dict:
+    """Keyword-based fallback when no API key is configured.
+
+    Args:
+        description: Ticket body.
+        merged: Merged attachment text.
+
+    Returns:
+        Classification dict compatible with graph state.
+    """
     text = f"{description}\n{merged}"
     scores: dict[str, float] = {f: 0.0 for f in SUPPORTED_FUNCTIONS}
     evidence: list[str] = []
