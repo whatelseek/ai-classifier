@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     )
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    openai_base_url: str | None = Field(default=None, alias="OPENAI_BASE_URL")
     openai_text_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_TEXT_MODEL")
     openai_vision_model: str = Field(default="gpt-4.1-mini", alias="OPENAI_VISION_MODEL")
     openai_timeout_seconds: int = Field(default=60, alias="OPENAI_TIMEOUT_SECONDS")
@@ -55,11 +56,20 @@ class Settings(BaseSettings):
     log_json: bool = Field(default=True, alias="LOG_JSON")
     mask_internal_hosts: bool = Field(default=True, alias="MASK_INTERNAL_HOSTS")
     temp_dir: Path = Field(default=Path("/tmp/it-ticket-classifier"), alias="TEMP_DIR")
+    docling_api_url: str | None = Field(default=None, alias="DOCLING_API_URL")
+    docling_timeout_seconds: int = Field(default=120, alias="DOCLING_TIMEOUT_SECONDS")
 
     @property
     def openai_configured(self) -> bool:
-        """Whether a non-empty API key is present."""
-        return bool(self.openai_api_key and self.openai_api_key.strip())
+        """Whether LLM calls can be made (API key and/or OpenAI-compatible proxy)."""
+        has_key = bool(self.openai_api_key and self.openai_api_key.strip())
+        has_proxy = bool(self.openai_base_url and self.openai_base_url.strip())
+        return has_key or has_proxy
+
+    @property
+    def uses_openai_compatible_proxy(self) -> bool:
+        """Route LLM traffic through Chat Completions (vLLM / Envoy), not Responses API."""
+        return bool(self.openai_base_url and self.openai_base_url.strip())
 
 
 @lru_cache
