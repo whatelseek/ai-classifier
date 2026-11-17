@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     openai_max_retries: int = Field(default=2, alias="OPENAI_MAX_RETRIES")
     openai_max_input_tokens: int = Field(default=12000, alias="OPENAI_MAX_INPUT_TOKENS")
     openai_max_output_tokens: int = Field(default=128, alias="OPENAI_MAX_OUTPUT_TOKENS")
+    classify_extract_request_body: bool = Field(default=True, alias="CLASSIFY_EXTRACT_REQUEST_BODY")
 
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024, alias="MAX_FILE_SIZE_BYTES")
     max_attachments: int = Field(default=10, alias="MAX_ATTACHMENTS")

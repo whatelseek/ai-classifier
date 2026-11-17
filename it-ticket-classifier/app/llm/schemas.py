@@ -88,3 +88,18 @@ def _strict_classification_schema() -> dict:
 
 
 CLASSIFICATION_JSON_SCHEMA = _strict_classification_schema()
+
+# Smaller schema for Joey/vLLM (fewer fields → less guided-decoding padding).
+JOEY_CLASSIFICATION_JSON_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "function": {
+            "type": "string",
+            "enum": ["network", "linux", "security", "database", "needs_review"],
+        },
+        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "reason": {"type": "string", "maxLength": 240},
+    },
+    "required": ["function", "confidence", "reason"],
+    "additionalProperties": False,
+}

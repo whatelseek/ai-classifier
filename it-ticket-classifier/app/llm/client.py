@@ -17,7 +17,13 @@ from openai import (
 
 from app.core.config import Settings
 from app.llm.prompts import CLASSIFICATION_SYSTEM_PROMPT, build_classification_user_content
-from app.llm.schemas import CLASSIFICATION_JSON_SCHEMA, LLMClassificationOutput
+from app.llm.prompts_joey import JOEY_CLASSIFICATION_SYSTEM_PROMPT, build_joey_user_content
+from app.llm.schemas import (
+    CLASSIFICATION_JSON_SCHEMA,
+    JOEY_CLASSIFICATION_JSON_SCHEMA,
+    LLMClassificationOutput,
+)
+from app.llm.ticket_body import extract_request_body
 
 logger = logging.getLogger(__name__)
 
@@ -133,28 +139,44 @@ class OpenAIClassificationClient:
         if not self._client:
             raise RuntimeError("OpenAI API key is not configured")
 
-        user_content = build_classification_user_content(
-            description,
-            merged_context,
-            client,
-            issue_key,
-            retry_feedback=retry_feedback,
-            max_chars=self._settings.openai_max_input_tokens * 4,
-        )
+        body = description
+        if self._settings.classify_extract_request_body:
+            body = extract_request_body(description)
+
+        use_joey = "joey" in (self._settings.openai_text_model or "").lower()
+        if use_joey:
+            system_prompt = JOEY_CLASSIFICATION_SYSTEM_PROMPT
+            user_content = build_joey_user_content(
+                body, merged_context, retry_feedback=retry_feedback
+            )
+            json_schema = JOEY_CLASSIFICATION_JSON_SCHEMA
+            strict_json = False
+        else:
+            system_prompt = CLASSIFICATION_SYSTEM_PROMPT
+            user_content = build_classification_user_content(
+                body,
+                merged_context,
+                client,
+                issue_key,
+                retry_feedback=retry_feedback,
+                max_chars=self._settings.openai_max_input_tokens * 4,
+            )
+            json_schema = CLASSIFICATION_JSON_SCHEMA
+            strict_json = True
 
         if self._use_chat_api:
             response = await self._client.chat.completions.create(
                 model=self._settings.openai_text_model,
                 messages=[
-                    {"role": "system", "content": CLASSIFICATION_SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
                 response_format={
                     "type": "json_schema",
                     "json_schema": {
                         "name": "ticket_classification",
-                        "strict": True,
-                        "schema": CLASSIFICATION_JSON_SCHEMA,
+                        "strict": strict_json,
+                        "schema": json_schema,
                     },
                 },
                 max_tokens=self._settings.openai_max_output_tokens,
@@ -302,9 +324,10 @@ def _salvage_classification_json(raw: str) -> LLMClassificationOutput | None:
         return None
     func = func_match.group("func").lower()
     confidence = 0.65
-    conf_match = re.search(r'"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)', raw)
+    conf_match = re.search(r'"confidence"\s*:\s*(?P<c>-?\d+(?:\.\d+)?)', raw)
     if conf_match:
-        confidence = float(conf_match.group("c"))
+        parsed_conf = float(conf_match.group("c"))
+        confidence = parsed_conf if 0.0 <= parsed_conf <= 1.0 else 0.72
     reason = "Recovered from partial model JSON (truncated or padded structured output)"
     reason_match = re.search(r'"reason"\s*:\s*"(?P<r>(?:\\.|[^"\\])*)"', raw, re.DOTALL)
     if reason_match:
