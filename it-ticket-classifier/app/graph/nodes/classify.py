@@ -89,19 +89,11 @@ async def classify_function(state: AgentState, runtime: Runtime[GraphContext]) -
             raise
         logger.exception("Classification output rejected")
         partial = _invalid_output_update(state, exc, settings.max_classification_retries)
-        if partial.get("status") == "failed" and settings.classification_heuristic_fallback:
-            partial = _heuristic_fallback_after_llm_failure(
-                description,
-                merged,
-                usage,
-                state.get("retry_count", 0),
-            )
         log_node(
             logger,
             "classify_function",
             started,
-            status=partial.get("status"),
-            function=(partial.get("classification") or {}).get("function"),
+            status=partial["status"],
             retry_count=state.get("retry_count", 0),
         )
         return partial
@@ -178,37 +170,6 @@ def _from_llm(result: LLMClassificationOutput) -> dict:
         "reason": result.reason,
         "alternatives": [{"function": a.function, "score": a.score} for a in result.alternatives],
         "evidence": list(result.evidence),
-    }
-
-
-def _heuristic_fallback_after_llm_failure(
-    description: str,
-    merged: str,
-    usage: LLMUsageTracker,
-    retry_count: int,
-) -> dict:
-    """Use keyword rules when the LLM returns unusable JSON after all retries."""
-    output = _heuristic_classify(description, merged)
-    if output["function"] == "needs_review":
-        return {
-            "status": "failed",
-            "retry_feedback": "",
-            "llm_calls": usage.llm_calls,
-            "token_usage": usage.token_usage,
-            "errors": [{"code": "classification_error", "message": CLASSIFICATION_FAILED}],
-        }
-    output["reason"] = (
-        "Heuristic fallback after invalid or truncated LLM output: "
-        + output["reason"]
-    )
-    output["confidence"] = min(output["confidence"], 0.78)
-    return {
-        "classification": output,
-        "confidence": output["confidence"],
-        "llm_calls": usage.llm_calls,
-        "token_usage": usage.token_usage,
-        "retry_feedback": "",
-        "status": "classified",
     }
 
 
