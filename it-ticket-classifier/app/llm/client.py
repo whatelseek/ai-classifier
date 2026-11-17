@@ -238,28 +238,31 @@ class OpenAIClassificationClient:
 def _normalize_vllm_structured_json(raw: str) -> str:
     """Repair Joey/vLLM structured outputs that pad with tabs after ``confidence``."""
     text = raw.strip()
-    head = re.match(
-        r'\{\s*"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"'
-        r'\s*,\s*"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)?',
+    func_match = re.search(
+        r'"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"',
         text,
         flags=re.IGNORECASE,
     )
-    if not head:
+    if not func_match:
         return re.sub(r"[\t ]{20,}", "", text)
-    func = head.group("func").lower()
-    conf = float(head.group("c")) if head.group("c") else 0.72
-    remainder = text[head.end() :]
-    if remainder and not remainder.lstrip().startswith(('"', "}", ",")):
+    func = func_match.group("func").lower()
+    conf_match = re.search(r'"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)', text)
+    has_padding = re.search(r'"confidence"\s*:\s*[\t ]{2,}', text) is not None
+    try_to_repair = has_padding or (
+        conf_match is None and re.search(r'"confidence"\s*:', text) is not None
+    )
+    if try_to_repair:
+        confidence = float(conf_match.group("c")) if conf_match else 0.72
         return json.dumps(
             {
                 "function": func,
-                "confidence": conf,
+                "confidence": confidence,
                 "reason": "Structured model head (vLLM output padding removed)",
                 "alternatives": [],
                 "evidence": [],
             }
         )
-    return text
+    return re.sub(r"[\t ]{20,}", "", text)
 
 
 def _parse_classification_json(raw: str) -> LLMClassificationOutput:
