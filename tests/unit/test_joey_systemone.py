@@ -1,13 +1,15 @@
 """System One routing question and answer parsing."""
 
+import json
+
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.llm import joey_systemone
 from app.llm.client import LLMUsageTracker
 from app.llm.joey_systemone import (
-    ROUTE_CRITERIA,
     build_route_questions,
     classify_via_systemone,
     parse_choice_answer,
@@ -15,7 +17,7 @@ from app.llm.joey_systemone import (
 
 
 def test_route_question_is_choice_over_teams_and_unclassified():
-    q = build_route_questions()["route"]
+    q = build_route_questions(Settings(_env_file=None))["route"]
     assert q["type"] == "choice"
     assert list(q["criteria"]) == [
         "database",
@@ -69,6 +71,11 @@ def test_parse_choice_without_probabilities_fails():
         parse_choice_answer({"type": "choice", "choice": "security"})
 
 
+def test_blank_routing_text_is_rejected():
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, JOEY_CRITERIA_NETWORK="  ")
+
+
 def test_systemone_needs_only_a_url():
     local = Settings(_env_file=None, JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone")
     assert local.joey_uses_systemone
@@ -86,7 +93,7 @@ async def _post_recording(monkeypatch, settings: Settings) -> httpx.Request:
 
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        probs = {name: 0.02 for name in ROUTE_CRITERIA}
+        probs = {name: 0.02 for name in settings.joey_route_criteria}
         probs["security"] = 0.92
         return httpx.Response(
             200,
@@ -131,3 +138,27 @@ async def test_api_key_is_sent_as_bearer(monkeypatch):
     )
     request = await _post_recording(monkeypatch, settings)
     assert request.headers["authorization"] == "Bearer k-123"
+
+
+async def test_question_and_criteria_come_from_env(monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone",
+        JOEY_ROUTE_INSTRUCTIONS="Which team?",
+        JOEY_CRITERIA_DATABASE="databases",
+        JOEY_CRITERIA_SECURITY="security events",
+        JOEY_CRITERIA_NETWORK="vpn and firewalls",
+        JOEY_CRITERIA_IT_INFRASTRUCTURE="servers and mail",
+        JOEY_CRITERIA_UNCLASSIFIED="not an IT problem",
+    )
+    request = await _post_recording(monkeypatch, settings)
+    body = json.loads(request.content)
+    route = body["questions"]["route"]
+    assert route["instructions"] == "Which team?"
+    assert route["criteria"] == {
+        "database": "databases",
+        "security": "security events",
+        "network": "vpn and firewalls",
+        "it_infrastructure": "servers and mail",
+        "unclassified": "not an IT problem",
+    }

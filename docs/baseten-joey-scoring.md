@@ -27,7 +27,7 @@ JOEY_DECISION_MODEL=decision-models/baseten-joey-2b-latest
 
 - `state`: the ticket description after `extract_request_body` (no attachments, headers or signatures).
 - `questions.route`: one `choice` question, instructions `Какая команда поддержки должна обработать это обращение?`.
-- `criteria`: `database`, `security`, `network`, `it_infrastructure` and `unclassified`, each with a one-sentence description of what the team handles. The text lives in `ROUTE_CRITERIA` in `app/llm/joey_systemone.py`.
+- `criteria`: `database`, `security`, `network`, `it_infrastructure` and `unclassified`, each with a one-sentence description of what the team handles. The question is `JOEY_ROUTE_INSTRUCTIONS` and the descriptions are `JOEY_CRITERIA_DATABASE`, `JOEY_CRITERIA_SECURITY`, `JOEY_CRITERIA_NETWORK`, `JOEY_CRITERIA_IT_INFRASTRUCTURE`, and `JOEY_CRITERIA_UNCLASSIFIED` (`k8s/deployment.yaml`, or `.env` locally).
 
 The decision is the option with the highest probability, and `confidence` is that probability. `unclassified` is a real option the model can pick, not a confidence threshold.
 
