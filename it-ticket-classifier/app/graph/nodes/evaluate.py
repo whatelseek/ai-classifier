@@ -56,7 +56,10 @@ def evaluate_confidence(state: AgentState) -> dict:
             },
         }
 
-    if confidence < 0.55 and state.get("retry_count", 0) < get_settings().max_classification_retries:
+    if (
+        confidence < 0.55
+        and state.get("retry_count", 0) < get_settings().effective_max_classification_retries
+    ):
         log_node(
             logger,
             "evaluate_confidence",

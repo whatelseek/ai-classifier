@@ -44,6 +44,15 @@ class ImageParser(BaseParser):
         ext = filename.rsplit(".", 1)[-1].lower()
         media = MEDIA_TYPES.get(ext, content_type or "image/png")
 
+        settings = get_settings()
+        if settings.classification_scoring_only:
+            return ParseResult(
+                filename=filename,
+                parser="image",
+                status="skipped",
+                error="Vision LLM disabled in classification scoring-only mode",
+            )
+
         if not self._llm.is_available:
             return ParseResult(
                 filename=filename,

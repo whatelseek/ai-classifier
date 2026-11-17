@@ -88,7 +88,7 @@ async def classify_function(state: AgentState, runtime: Runtime[GraphContext]) -
             logger.exception("Transient classification error")
             raise
         logger.exception("Classification output rejected")
-        partial = _invalid_output_update(state, exc, settings.max_classification_retries)
+        partial = _invalid_output_update(state, exc, settings.effective_max_classification_retries)
         log_node(
             logger,
             "classify_function",

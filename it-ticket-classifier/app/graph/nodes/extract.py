@@ -77,10 +77,11 @@ async def _process_attachment_list(
             "branch": branch,
         }
         extracted.append(chunk)
+        att_status = result.status if result.status in ("processed", "failed", "skipped") else "failed"
         statuses.append(
             {
                 "filename": result.filename,
-                "status": "processed" if result.status == "processed" else "failed",
+                "status": att_status,
                 "parser": result.parser,
                 "error": result.error,
             }

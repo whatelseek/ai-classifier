@@ -14,7 +14,7 @@
   "state_template": "=== Ticket body ===\n{description_and_attachments}\n",
   "example_state_TCK-211291": "отчет сканера что делать\n\n<file name=\"scan_report.csv\">\nhost;port;cve;cvss;title\n10.50.1.11;443;CVE-2024-6387;8.1;OpenSSH regreSSHion RCE\n10.50.1.14;8080;CVE-2024-23897;9.8;Jenkins arbitrary file read\n</file>",
   "prod_api": {
-    "url": "http://it-classifier.apps.vexa.home/api/v1/classify",
+    "url": "http://it-classifier.apps.vexa.home/api/v1/score",
     "fields_to_read": ["classification.function", "classification.confidence"]
   }
 }

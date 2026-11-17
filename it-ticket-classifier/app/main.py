@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="IT Ticket Classifier",
         version=__version__,
-        description="AI-powered IT support ticket classification agent",
+        description="IT support ticket routing scorer (structured classification only)",
         lifespan=lifespan,
     )
     app.include_router(router)

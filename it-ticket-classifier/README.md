@@ -6,6 +6,7 @@ Built with **FastAPI**, **LangGraph**, **OpenAI Responses API**, and **Docling**
 
 ## Features
 
+- `POST /api/v1/score` — scoring-only routing (one structured classify call; use for agents)
 - `POST /api/v1/classify` — multipart ticket classification
 - LangGraph `StateGraph` with conditional routing, bounded retries, and parallel attachment processing (`Send` fan-out)
 - Parsers for PDF/DOCX/PPTX (Docling), XLSX/CSV, images (OpenAI vision), VSDX (XML), text/JSON/XML/YAML

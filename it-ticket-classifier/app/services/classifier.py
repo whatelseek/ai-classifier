@@ -13,9 +13,11 @@ from app.core.logging import request_id_var
 from app.core.security import validate_extension, verify_file_signature
 from app.graph.builder import get_graph
 from app.graph.context import GraphContext
-from app.llm.client import OpenAIClassificationClient
+from app.graph.nodes.classify import _heuristic_classify
+from app.llm.client import LLMUsageTracker, OpenAIClassificationClient
 from app.models.requests import ClassifyRequestPayload, UploadedAttachment
 from app.models.responses import (
+    AlternativeFunction,
     AttachmentStatusItem,
     ClassificationResult,
     ClassifyResponse,
@@ -44,10 +46,22 @@ class ClassificationService:
         self._graph = get_graph()
         self._llm = llm_client or OpenAIClassificationClient(self._settings)
 
+    async def score(
+        self,
+        payload: ClassifyRequestPayload,
+        started_at: float | None = None,
+    ) -> ClassifyResponse:
+        """Structured routing score only (no LangGraph when text-only).
+
+        Uses a single ``json_schema`` classify call; never vision text completions.
+        """
+        return await self.classify(payload, started_at=started_at, force_scoring_path=True)
+
     async def classify(
         self,
         payload: ClassifyRequestPayload,
         started_at: float | None = None,
+        force_scoring_path: bool = False,
     ) -> ClassifyResponse:
         """Validate input, invoke LangGraph, and map state to a REST response.
 
@@ -76,6 +90,12 @@ class ClassificationService:
                     errors=validation_errors,
                     processing=ProcessingMeta(duration_ms=_duration_ms(start)),
                 )
+
+            use_fast_score = force_scoring_path or (
+                self._settings.classification_scoring_only and not payload.attachments
+            )
+            if use_fast_score:
+                return await self._classify_scoring_only(payload, request_id, start)
 
             attachments_meta = await anyio.to_thread.run_sync(
                 self._persist_attachments, payload.attachments, temp_paths
@@ -133,6 +153,72 @@ class ClassificationService:
         finally:
             request_id_var.reset(token)
             await anyio.to_thread.run_sync(self._cleanup, temp_paths)
+
+    async def _classify_scoring_only(
+        self,
+        payload: ClassifyRequestPayload,
+        request_id: str,
+        start: float,
+    ) -> ClassifyResponse:
+        """One structured LLM call (or heuristic) — no attachment vision completions."""
+        usage = LLMUsageTracker()
+        description = payload.description or ""
+        try:
+            if self._llm.is_available:
+                result = await self._llm.classify(
+                    description=description,
+                    merged_context="",
+                    client=payload.client,
+                    issue_key=payload.issue_key,
+                    usage=usage,
+                    retry_feedback=None,
+                )
+                classification = ClassificationResult(
+                    function=result.function,
+                    confidence=result.confidence,
+                    reason=result.reason,
+                    alternatives=[
+                        AlternativeFunction(function=a.function, score=a.score) for a in result.alternatives
+                    ],
+                    evidence=list(result.evidence),
+                )
+                status = (
+                    ResponseStatus.needs_review
+                    if result.function == "needs_review"
+                    else ResponseStatus.classified
+                )
+                model = self._settings.openai_text_model
+            else:
+                raw = _heuristic_classify(description, "")
+                classification = ClassificationResult.model_validate(raw)
+                status = (
+                    ResponseStatus.needs_review
+                    if raw.get("function") == "needs_review"
+                    else ResponseStatus.classified
+                )
+                model = "heuristic"
+        except Exception:
+            logger.exception("Scoring-only classification failed", extra={"request_id": request_id})
+            return ClassifyResponse(
+                request_id=request_id,
+                status=ResponseStatus.failed,
+                errors=[{"code": "classification_error", "message": "Classification failed"}],
+                processing=ProcessingMeta(duration_ms=_duration_ms(start)),
+            )
+
+        return ClassifyResponse(
+            request_id=request_id,
+            status=status,
+            classification=classification,
+            attachments=[],
+            processing=ProcessingMeta(
+                model=model,
+                llm_calls=usage.llm_calls,
+                duration_ms=_duration_ms(start),
+                token_usage=dict(usage.token_usage) if usage.token_usage else None,
+            ),
+            errors=[],
+        )
 
     def _validate_uploads(self, payload: ClassifyRequestPayload) -> list[dict[str, str]]:
         """Enforce presence, count, size, extension, and signature rules.

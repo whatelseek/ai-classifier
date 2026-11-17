@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     openai_max_input_tokens: int = Field(default=12000, alias="OPENAI_MAX_INPUT_TOKENS")
     openai_max_output_tokens: int = Field(default=128, alias="OPENAI_MAX_OUTPUT_TOKENS")
     classify_extract_request_body: bool = Field(default=True, alias="CLASSIFY_EXTRACT_REQUEST_BODY")
+    # One structured classify call; no vision completions, no confidence retry loops.
+    classification_scoring_only: bool = Field(default=True, alias="CLASSIFICATION_SCORING_ONLY")
 
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024, alias="MAX_FILE_SIZE_BYTES")
     max_attachments: int = Field(default=10, alias="MAX_ATTACHMENTS")
@@ -72,6 +74,13 @@ class Settings(BaseSettings):
     def uses_openai_compatible_proxy(self) -> bool:
         """Route LLM traffic through Chat Completions (vLLM / Envoy), not Responses API."""
         return bool(self.openai_base_url and self.openai_base_url.strip())
+
+    @property
+    def effective_max_classification_retries(self) -> int:
+        """Retry budget for low-confidence re-classify loops (zero in scoring-only mode)."""
+        if self.classification_scoring_only:
+            return 0
+        return self.max_classification_retries
 
 
 @lru_cache

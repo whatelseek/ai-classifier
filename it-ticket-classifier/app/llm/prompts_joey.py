@@ -1,6 +1,6 @@
 """Compact prompts tuned for local Joey / vLLM structured decoding."""
 
-JOEY_CLASSIFICATION_SYSTEM_PROMPT = """You route IT tickets to exactly one resolver team. Reply with JSON only.
+JOEY_CLASSIFICATION_SYSTEM_PROMPT = """You score IT tickets to exactly one resolver team. Reply with JSON only — no prose, no suggested actions, no user reply.
 
 Teams:
 - network — VPN, firewall, routing, DNS, Check Point, MikroTik

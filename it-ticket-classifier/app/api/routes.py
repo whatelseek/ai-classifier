@@ -58,6 +58,27 @@ async def list_functions() -> FunctionsListResponse:
     return build_functions_response()
 
 
+@router.post("/api/v1/score", response_model=ClassifyResponse)
+async def score_ticket(
+    description: str | None = Form(default=None),
+    issue_key: str | None = Form(default=None),
+    client: str | None = Form(default=None),
+    files: list[UploadFile] = File(default=[]),
+    settings: Settings = Depends(get_app_settings),
+    semaphore=Depends(get_request_semaphore),
+) -> ClassifyResponse:
+    """Score-only routing: structured ``function`` + ``confidence``, no action text."""
+    return await classify_ticket(
+        description=description,
+        issue_key=issue_key,
+        client=client,
+        files=files,
+        settings=settings,
+        semaphore=semaphore,
+        scoring_only=True,
+    )
+
+
 @router.post("/api/v1/classify", response_model=ClassifyResponse)
 async def classify_ticket(
     description: str | None = Form(default=None),
@@ -66,6 +87,7 @@ async def classify_ticket(
     files: list[UploadFile] = File(default=[]),
     settings: Settings = Depends(get_app_settings),
     semaphore=Depends(get_request_semaphore),
+    scoring_only: bool = False,
 ) -> ClassifyResponse:
     """Classify a ticket from multipart form text and optional file attachments.
 
@@ -109,6 +131,8 @@ async def classify_ticket(
                     attachments=attachments,
                 )
                 service = ClassificationService(settings)
+                if scoring_only:
+                    return await service.score(payload, started_at=started)
                 return await service.classify(payload, started_at=started)
     except TimeoutError:
         return ClassifyResponse(

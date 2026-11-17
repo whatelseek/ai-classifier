@@ -134,14 +134,14 @@ def route_after_confidence(state: AgentState) -> RouteAfterConfidence:
         return "format_response"
 
     if status == "retry":
-        if retry_count < settings.max_classification_retries:
+        if retry_count < settings.effective_max_classification_retries:
             return "retry_classification"
         return "format_response"
 
     if status == "needs_review" or func == "needs_review":
         return "needs_review_path"
 
-    if confidence < 0.55 and retry_count < settings.max_classification_retries:
+    if confidence < 0.55 and retry_count < settings.effective_max_classification_retries:
         return "retry_classification"
 
     return "format_response"

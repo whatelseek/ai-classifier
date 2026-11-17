@@ -47,6 +47,21 @@ async def test_classify_text_network(app):
 
 
 @pytest.mark.asyncio
+async def test_score_endpoint_text_only(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/score",
+            data={"description": "Configure IPsec VPN between Check Point and MikroTik"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] in ("classified", "needs_review")
+        assert body["classification"]["function"] in ("network", "needs_review", "linux", "security", "database")
+        assert body["processing"]["llm_calls"] in (0, 1)
+
+
+@pytest.mark.asyncio
 async def test_classify_validation_error(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
