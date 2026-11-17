@@ -30,4 +30,4 @@ Decisions: **`database`**, **`security`**, **`network`**, **`it_infrastructure`*
 
 ## Joey = System One
 
-Joey (`baselabs/joey-1`) is a decision model. It only works through the **System One** API (`state` + `choice` question), served on Spark by `it-ticket-classifier/services/joey-qev-server` (port 8003). Do not serve or call it through vLLM / OpenAI chat completions: that returns noise. Check `GET /ready`: `joey_uses_systemone` must be `true`. Details: `it-ticket-classifier/docs/joey-vllm-troubleshooting.md`.
+Joey (`baselabs/joey-1`) is a decision model. It only works through the **System One** API (`state` + `choice` question), served on Spark by `services/joey-qev-server` (port 8003). Do not serve or call it through vLLM / OpenAI chat completions: that returns noise. Check `GET /ready`: `joey_uses_systemone` must be `true`. Deploy and the reason: `docs/joey.md`.

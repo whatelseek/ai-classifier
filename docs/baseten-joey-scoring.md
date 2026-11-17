@@ -4,7 +4,7 @@ Joey answers through the **System One** API only: a `state` plus typed `question
 
 ## Endpoints
 
-Self-hosted on Spark (what `k8s/deployment.yaml` uses; see `joey-vllm-troubleshooting.md` for how it is served):
+Self-hosted on Spark (what `k8s/deployment.yaml` uses; deploy and why vLLM cannot serve it: [joey.md](joey.md)):
 
 ```bash
 JOEY_ROUTING_MODE=systemone
