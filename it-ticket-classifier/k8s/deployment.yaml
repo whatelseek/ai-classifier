@@ -75,13 +75,9 @@ spec:
             - name: OPENAI_MAX_OUTPUT_TOKENS
               value: "128"
             - name: MAX_CONCURRENT_REQUESTS
-              value: "20"
+              value: "4"
             - name: REQUEST_TIMEOUT_SECONDS
               value: "300"
-            - name: REQUEST_TIMEOUT_SECONDS
-              value: "300"
-            - name: MAX_CONCURRENT_REQUESTS
-              value: "20"
             - name: TEMP_DIR
               value: /data/tmp
           resources:
