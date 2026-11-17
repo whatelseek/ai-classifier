@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # the OpenAI SDK client is created with max_retries=0.
     openai_max_retries: int = Field(default=2, alias="OPENAI_MAX_RETRIES")
     openai_max_input_tokens: int = Field(default=12000, alias="OPENAI_MAX_INPUT_TOKENS")
+    openai_max_output_tokens: int = Field(default=512, alias="OPENAI_MAX_OUTPUT_TOKENS")
 
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024, alias="MAX_FILE_SIZE_BYTES")
     max_attachments: int = Field(default=10, alias="MAX_ATTACHMENTS")

@@ -154,7 +154,7 @@ class OpenAIClassificationClient:
                         "schema": CLASSIFICATION_JSON_SCHEMA,
                     },
                 },
-                max_tokens=2048,
+                max_tokens=self._settings.openai_max_output_tokens,
                 temperature=0.0,
             )
             usage.record(response.usage)
