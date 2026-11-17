@@ -7,39 +7,14 @@ from typing import Any
 
 import httpx
 
-from app.core.config import SUPPORTED_FUNCTIONS, UNCLASSIFIED, Settings
+from app.core.config import SUPPORTED_FUNCTIONS, Settings, get_settings
 from app.llm.schemas import LLMAlternative, LLMClassificationOutput
 
 logger = logging.getLogger(__name__)
 
-ROUTE_INSTRUCTIONS = "Какая команда поддержки должна обработать это обращение?"
 
-# Option name -> what the team handles. Joey scores each option by its description, so the
-# descriptions carry the routing policy; team names alone route noticeably worse.
-ROUTE_CRITERIA: dict[str, str] = {
-    "database": (
-        "Базы данных и СУБД (PostgreSQL, MySQL, Oracle, MS SQL, ClickHouse): запросы, "
-        "производительность, репликация, блокировки, схемы и данные в БД"
-    ),
-    "security": (
-        "Информационная безопасность: антивирусная защита и вредоносное ПО, управление "
-        "уязвимостями и отчёты сканеров, фишинг и почтовая безопасность, социальная инженерия, "
-        "учётные записи (блокировки, подбор паролей), утечка секретов и паролей, утеря или кража "
-        "устройств, доступ к системам с персональными данными, подозрительная активность на серверах"
-    ),
-    "network": (
-        "Сеть: VPN и удалённый доступ, межсетевые экраны, открытие портов и сетевых доступов "
-        "между сервисами, маршрутизация, DNS"
-    ),
-    "it_infrastructure": (
-        "ИТ-инфраструктура: серверы Linux (место на диске, нагрузка, SSH-доступ), Kubernetes, "
-        "резервное копирование и восстановление файлов, корпоративная почта, TLS-сертификаты, "
-        "файловые ресурсы и общие папки"
-    ),
-    UNCLASSIFIED: (
-        "Обращение не относится к ИТ-поддержке или из текста невозможно понять, в чём проблема"
-    ),
-}
+def _settings(settings: Settings | None) -> Settings:
+    return get_settings() if settings is None else settings
 
 
 def build_decision_state(body: str, merged_context: str) -> str:
@@ -53,24 +28,33 @@ def build_decision_state(body: str, merged_context: str) -> str:
     return "\n\n".join(parts) if parts else "(empty)"
 
 
-def build_route_questions() -> dict[str, Any]:
-    """One ``choice`` question: the four teams plus an explicit ``unclassified`` option."""
+def build_route_questions(settings: Settings | None = None) -> dict[str, Any]:
+    """One ``choice`` question: the four teams plus an explicit ``unclassified`` option.
+
+    The question and each option's description come from settings (environment variables).
+    """
+    current = _settings(settings)
     return {
         "route": {
             "type": "choice",
-            "instructions": ROUTE_INSTRUCTIONS,
-            "criteria": dict(ROUTE_CRITERIA),
+            "instructions": current.joey_route_instructions,
+            "criteria": dict(current.joey_route_criteria),
         }
     }
 
 
-def parse_choice_answer(answer: dict[str, Any]) -> LLMClassificationOutput:
+def parse_choice_answer(
+    answer: dict[str, Any],
+    criteria: dict[str, str] | None = None,
+) -> LLMClassificationOutput:
     """Map a System One choice answer to ``LLMClassificationOutput``.
 
-    ``confidence`` is the winning option's probability.
+    ``confidence`` is the winning option's probability. Probabilities for labels outside
+    ``criteria`` are ignored.
     """
+    allowed = criteria if criteria is not None else _settings(None).joey_route_criteria
     raw_probs: dict[str, Any] = answer.get("probabilities") or {}
-    probs = {str(k): float(v) for k, v in raw_probs.items() if str(k) in ROUTE_CRITERIA}
+    probs = {str(k): float(v) for k, v in raw_probs.items() if str(k) in allowed}
     if not probs:
         raise ValueError("Missing probabilities in choice answer")
 
@@ -101,11 +85,12 @@ async def classify_via_systemone(
     if not url:
         raise RuntimeError("JOEY_SYSTEMONE_URL is not configured")
 
+    criteria = settings.joey_route_criteria
     payload = {
         "model": settings.joey_decision_model,
         "service_tier": "default",
         "state": state,
-        "questions": build_route_questions(),
+        "questions": build_route_questions(settings),
     }
     headers = {"Content-Type": "application/json"}
     # The self-hosted qev server takes no key; Baseten needs one.
@@ -136,4 +121,4 @@ async def classify_via_systemone(
     if not isinstance(route, dict):
         raise ValueError("System One response missing answers.route")
 
-    return parse_choice_answer(route)
+    return parse_choice_answer(route, criteria)

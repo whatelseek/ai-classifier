@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SUPPORTED_FUNCTIONS = ("database", "security", "network", "it_infrastructure")
@@ -15,6 +15,31 @@ FUNCTION_DISPLAY_NAMES: dict[str, str] = {
     "network": "Network",
     "it_infrastructure": "IT-infrastructure",
 }
+
+# Defaults for the System One question. Environment variables of the same name override them.
+_DEFAULT_ROUTE_INSTRUCTIONS = "Какая команда поддержки должна обработать это обращение?"
+_DEFAULT_CRITERIA_DATABASE = (
+    "Базы данных и СУБД (PostgreSQL, MySQL, Oracle, MS SQL, ClickHouse): запросы, "
+    "производительность, репликация, блокировки, схемы и данные в БД"
+)
+_DEFAULT_CRITERIA_SECURITY = (
+    "Информационная безопасность: антивирусная защита и вредоносное ПО, управление "
+    "уязвимостями и отчёты сканеров, фишинг и почтовая безопасность, социальная инженерия, "
+    "учётные записи (блокировки, подбор паролей), утечка секретов и паролей, утеря или кража "
+    "устройств, доступ к системам с персональными данными, подозрительная активность на серверах"
+)
+_DEFAULT_CRITERIA_NETWORK = (
+    "Сеть: VPN и удалённый доступ, межсетевые экраны, открытие портов и сетевых доступов "
+    "между сервисами, маршрутизация, DNS"
+)
+_DEFAULT_CRITERIA_IT_INFRASTRUCTURE = (
+    "ИТ-инфраструктура: серверы Linux (место на диске, нагрузка, SSH-доступ), Kubernetes, "
+    "резервное копирование и восстановление файлов, корпоративная почта, TLS-сертификаты, "
+    "файловые ресурсы и общие папки"
+)
+_DEFAULT_CRITERIA_UNCLASSIFIED = (
+    "Обращение не относится к ИТ-поддержке или из текста невозможно понять, в чём проблема"
+)
 
 
 class Settings(BaseSettings):
@@ -63,6 +88,31 @@ class Settings(BaseSettings):
         default="decision-models/baseten-joey-2b-latest",
         alias="JOEY_DECISION_MODEL",
     )
+    # The choice question sent to Joey. Keys stay the five decision labels; the text is the policy.
+    joey_route_instructions: str = Field(
+        default=_DEFAULT_ROUTE_INSTRUCTIONS,
+        alias="JOEY_ROUTE_INSTRUCTIONS",
+    )
+    joey_criteria_database: str = Field(
+        default=_DEFAULT_CRITERIA_DATABASE,
+        alias="JOEY_CRITERIA_DATABASE",
+    )
+    joey_criteria_security: str = Field(
+        default=_DEFAULT_CRITERIA_SECURITY,
+        alias="JOEY_CRITERIA_SECURITY",
+    )
+    joey_criteria_network: str = Field(
+        default=_DEFAULT_CRITERIA_NETWORK,
+        alias="JOEY_CRITERIA_NETWORK",
+    )
+    joey_criteria_it_infrastructure: str = Field(
+        default=_DEFAULT_CRITERIA_IT_INFRASTRUCTURE,
+        alias="JOEY_CRITERIA_IT_INFRASTRUCTURE",
+    )
+    joey_criteria_unclassified: str = Field(
+        default=_DEFAULT_CRITERIA_UNCLASSIFIED,
+        alias="JOEY_CRITERIA_UNCLASSIFIED",
+    )
 
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024, alias="MAX_FILE_SIZE_BYTES")
     max_attachments: int = Field(default=10, alias="MAX_ATTACHMENTS")
@@ -78,6 +128,32 @@ class Settings(BaseSettings):
     temp_dir: Path = Field(default=Path("/tmp/it-ticket-classifier"), alias="TEMP_DIR")
     docling_api_url: str | None = Field(default=None, alias="DOCLING_API_URL")
     docling_timeout_seconds: int = Field(default=120, alias="DOCLING_TIMEOUT_SECONDS")
+
+    @field_validator(
+        "joey_route_instructions",
+        "joey_criteria_database",
+        "joey_criteria_security",
+        "joey_criteria_network",
+        "joey_criteria_it_infrastructure",
+        "joey_criteria_unclassified",
+    )
+    @classmethod
+    def _routing_text_not_blank(cls, value: str) -> str:
+        text = value.strip()
+        if not text:
+            raise ValueError("routing text must not be empty")
+        return text
+
+    @property
+    def joey_route_criteria(self) -> dict[str, str]:
+        """Decision label -> description sent as the System One ``choice`` criteria."""
+        return {
+            "database": self.joey_criteria_database,
+            "security": self.joey_criteria_security,
+            "network": self.joey_criteria_network,
+            "it_infrastructure": self.joey_criteria_it_infrastructure,
+            UNCLASSIFIED: self.joey_criteria_unclassified,
+        }
 
     @property
     def openai_configured(self) -> bool:

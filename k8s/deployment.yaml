@@ -63,6 +63,19 @@ spec:
               value: "http://10.70.0.121:8003/v1/systemone"
             - name: JOEY_DECISION_MODEL
               value: "joey-1"
+            # Question and class descriptions. Edit these to change routing; restart the pod, no image rebuild.
+            - name: JOEY_ROUTE_INSTRUCTIONS
+              value: "Какая команда поддержки должна обработать это обращение?"
+            - name: JOEY_CRITERIA_DATABASE
+              value: "Базы данных и СУБД (PostgreSQL, MySQL, Oracle, MS SQL, ClickHouse): запросы, производительность, репликация, блокировки, схемы и данные в БД"
+            - name: JOEY_CRITERIA_SECURITY
+              value: "Информационная безопасность: антивирусная защита и вредоносное ПО, управление уязвимостями и отчёты сканеров, фишинг и почтовая безопасность, социальная инженерия, учётные записи (блокировки, подбор паролей), утечка секретов и паролей, утеря или кража устройств, доступ к системам с персональными данными, подозрительная активность на серверах"
+            - name: JOEY_CRITERIA_NETWORK
+              value: "Сеть: VPN и удалённый доступ, межсетевые экраны, открытие портов и сетевых доступов между сервисами, маршрутизация, DNS"
+            - name: JOEY_CRITERIA_IT_INFRASTRUCTURE
+              value: "ИТ-инфраструктура: серверы Linux (место на диске, нагрузка, SSH-доступ), Kubernetes, резервное копирование и восстановление файлов, корпоративная почта, TLS-сертификаты, файловые ресурсы и общие папки"
+            - name: JOEY_CRITERIA_UNCLASSIFIED
+              value: "Обращение не относится к ИТ-поддержке или из текста невозможно понять, в чём проблема"
             # A model name containing "joey" selects the System One path.
             - name: OPENAI_TEXT_MODEL
               value: joey-1

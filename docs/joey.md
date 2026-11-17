@@ -18,7 +18,7 @@ Two ways the qev server can look healthy and still score randomly:
 - `DecisionEngine` reads `readout.json` and `modeling_overrides` only from a **local directory**. Given the Hub id `baselabs/joey-1` it falls back to causal attention. `serve.py` resolves the snapshot path and exits unless the engine reports `attention=noncausal`.
 - `qev serve` selects the multimodal engine because this checkpoint has a `vision_config`, and `serve.patch` does not patch that engine. `serve.py` builds the text `DecisionEngine` directly.
 
-Once the server is noncausal, the question decides the accuracy. On the 176 labeled descriptions the ordered `score` question was 52.8%, a `choice` of bare team names was 61.9%, and a `choice` whose options are team descriptions (including `unclassified`) is 80.1%. That question is what the classifier sends. The text is `ROUTE_CRITERIA` in `app/llm/joey_systemone.py`; the measurements are in [baseten-joey-scoring.md](baseten-joey-scoring.md).
+Once the server is noncausal, the question decides the accuracy. On the 176 labeled descriptions the ordered `score` question was 52.8%, a `choice` of bare team names was 61.9%, and a `choice` whose options are team descriptions (including `unclassified`) is 80.1%. That question is what the classifier sends. The wording is the `JOEY_ROUTE_INSTRUCTIONS` and `JOEY_CRITERIA_*` environment variables; the measurements are in [baseten-joey-scoring.md](baseten-joey-scoring.md).
 
 ## Deploy
 
@@ -61,6 +61,8 @@ JOEY_SYSTEMONE_URL: http://10.70.0.121:8003/v1/systemone
 JOEY_DECISION_MODEL: joey-1
 OPENAI_TEXT_MODEL: joey-1
 ```
+
+The question and the five class descriptions are `JOEY_ROUTE_INSTRUCTIONS` and `JOEY_CRITERIA_DATABASE`, `JOEY_CRITERIA_SECURITY`, `JOEY_CRITERIA_NETWORK`, `JOEY_CRITERIA_IT_INFRASTRUCTURE`, `JOEY_CRITERIA_UNCLASSIFIED` in the same deployment. Editing them and restarting the pod changes routing; Joey does not need a restart, and the image does not need a rebuild. Unset, the process uses the wording that scored 80.1%. One ticket per class, with the answers that wording returns, is in [baseten-joey-scoring.md](baseten-joey-scoring.md).
 
 There is no `OPENAI_BASE_URL`. The classifier selects this path when `JOEY_SYSTEMONE_URL` is set and the text model name contains `joey`. `GET /ready` then reports `joey_uses_systemone: true`. No API key is sent to the self-hosted server.
 
