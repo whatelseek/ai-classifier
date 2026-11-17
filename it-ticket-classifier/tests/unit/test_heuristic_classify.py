@@ -3,9 +3,9 @@
 from app.graph.nodes.classify import _heuristic_classify
 
 
-def test_heuristic_network():
+def test_heuristic_it_infrastructure():
     out = _heuristic_classify("Configure IPsec VPN on MikroTik", "")
-    assert out["function"] == "network"
+    assert out["function"] == "it_infrastructure"
 
 
 def test_heuristic_database():

@@ -6,13 +6,12 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-SUPPORTED_FUNCTIONS = ("network", "linux", "security", "database")
+SUPPORTED_FUNCTIONS = ("it_infrastructure", "security", "database")
 
 FUNCTION_DISPLAY_NAMES: dict[str, str] = {
-    "network": "Network Infrastructure",
-    "linux": "Linux Administration",
-    "security": "Information Security",
-    "database": "Database Administration",
+    "it_infrastructure": "IT-infrastructure",
+    "security": "Security",
+    "database": "Database",
 }
 
 
@@ -45,6 +44,8 @@ class Settings(BaseSettings):
     openai_max_input_tokens: int = Field(default=12000, alias="OPENAI_MAX_INPUT_TOKENS")
     openai_max_output_tokens: int = Field(default=128, alias="OPENAI_MAX_OUTPUT_TOKENS")
     classify_extract_request_body: bool = Field(default=True, alias="CLASSIFY_EXTRACT_REQUEST_BODY")
+    # Classification uses description text only; attachments are still parsed but not scored.
+    classify_description_only: bool = Field(default=True, alias="CLASSIFY_DESCRIPTION_ONLY")
     # One structured classify call; no vision completions, no confidence retry loops.
     classification_scoring_only: bool = Field(default=True, alias="CLASSIFICATION_SCORING_ONLY")
     # Joey: systemone = Baseten Playground score API; vllm_json = legacy chat+json_schema on Spark.

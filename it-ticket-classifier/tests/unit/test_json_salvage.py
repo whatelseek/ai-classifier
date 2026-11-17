@@ -11,8 +11,8 @@ def test_salvage_truncated_database():
 
 
 def test_normalize_vllm_tab_padding():
-    raw = '{"function":"network","confidence":\t\t\t\t\t\t'
+    raw = '{"function":"it_infrastructure","confidence":\t\t\t\t\t\t'
     normalized = _normalize_vllm_structured_json(raw)
     out = _parse_classification_json(normalized)
-    assert out.function == "network"
+    assert out.function == "it_infrastructure"
     assert out.confidence >= 0.5

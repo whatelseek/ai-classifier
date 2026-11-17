@@ -18,7 +18,7 @@ The classifier sends:
 
 - `state` — ticket body (+ attachment text), same as Playground **STATE**
 - `questions.route` — `type: score`, instructions `К какой категории относится обращение?`
-- `criteria` — `network`, `linux`, `security`, `database` (low → high)
+- `criteria` — `it_infrastructure`, `security`, `database` (low → high); description text only
 
 Winner = level with highest `probabilities`. Without `BASETEN_API_KEY`, `auto` falls back to Spark vLLM JSON (legacy).
 

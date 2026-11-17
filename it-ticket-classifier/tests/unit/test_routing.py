@@ -19,7 +19,7 @@ def test_route_retry_bounded():
         "status": "classified",
         "confidence": 0.3,
         "retry_count": 0,
-        "classification": {"function": "network"},
+        "classification": {"function": "it_infrastructure"},
     }
     assert route_after_confidence(state) == "retry_classification"
 

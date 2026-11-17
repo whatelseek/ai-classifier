@@ -145,6 +145,10 @@ class OpenAIClassificationClient:
         if self._settings.classify_extract_request_body:
             body = extract_request_body(description)
 
+        description_only = self._settings.classify_description_only
+        if description_only:
+            merged_context = ""
+
         use_joey = "joey" in (self._settings.openai_text_model or "").lower()
         if use_joey and self._settings.joey_uses_systemone:
             state = build_decision_state(body, merged_context or "")
@@ -156,7 +160,10 @@ class OpenAIClassificationClient:
         if use_joey:
             system_prompt = JOEY_CLASSIFICATION_SYSTEM_PROMPT
             user_content = build_joey_user_content(
-                body, merged_context, retry_feedback=retry_feedback
+                body,
+                merged_context,
+                retry_feedback=retry_feedback,
+                description_only=description_only,
             )
             json_schema = JOEY_CLASSIFICATION_JSON_SCHEMA
             strict_json = False
@@ -169,6 +176,7 @@ class OpenAIClassificationClient:
                 issue_key,
                 retry_feedback=retry_feedback,
                 max_chars=self._settings.openai_max_input_tokens * 4,
+                description_only=description_only,
             )
             json_schema = CLASSIFICATION_JSON_SCHEMA
             strict_json = True
@@ -275,7 +283,7 @@ def _normalize_vllm_structured_json(raw: str) -> str:
     """Repair Joey/vLLM structured outputs that pad with tabs after ``confidence``."""
     text = raw.strip()
     func_match = re.search(
-        r'"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"',
+        r'"function"\s*:\s*"(?P<func>it_infrastructure|network|linux|security|database|needs_review)"',
         text,
         flags=re.IGNORECASE,
     )
@@ -327,7 +335,7 @@ def _parse_classification_json(raw: str) -> LLMClassificationOutput:
 def _salvage_classification_json(raw: str) -> LLMClassificationOutput | None:
     """Recover classification when vLLM returns truncated JSON."""
     func_match = re.search(
-        r'"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"',
+        r'"function"\s*:\s*"(?P<func>it_infrastructure|network|linux|security|database|needs_review)"',
         raw,
         re.IGNORECASE,
     )

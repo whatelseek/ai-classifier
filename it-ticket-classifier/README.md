@@ -1,6 +1,6 @@
 # IT Ticket Classifier
 
-Production-oriented asynchronous AI agent that classifies IT support requests (text and attachments) into support functions: **network**, **linux**, **security**, or **database**.
+Production-oriented AI agent that classifies IT tickets into **IT-infrastructure** (`it_infrastructure`), **Security**, or **Database** using **ticket description only** (attachments are still extracted but not used for routing).
 
 Built with **FastAPI**, **LangGraph**, **OpenAI Responses API**, and **Docling** for document extraction.
 

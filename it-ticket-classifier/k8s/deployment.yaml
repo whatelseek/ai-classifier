@@ -90,6 +90,8 @@ spec:
               value: "128"
             - name: CLASSIFY_EXTRACT_REQUEST_BODY
               value: "true"
+            - name: CLASSIFY_DESCRIPTION_ONLY
+              value: "true"
             - name: CLASSIFICATION_SCORING_ONLY
               value: "true"
             - name: MAX_CLASSIFICATION_RETRIES

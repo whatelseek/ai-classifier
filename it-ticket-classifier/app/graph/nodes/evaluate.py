@@ -3,7 +3,7 @@
 import logging
 import time
 
-from app.core.config import get_settings
+from app.core.config import SUPPORTED_FUNCTIONS, get_settings
 from app.graph.state import AgentState
 from app.graph.telemetry import log_node
 
@@ -45,7 +45,7 @@ def evaluate_confidence(state: AgentState) -> dict:
             "confidence": confidence,
         }
 
-    if func not in ("network", "linux", "security", "database"):
+    if func not in SUPPORTED_FUNCTIONS:
         log_node(logger, "evaluate_confidence", started, status="needs_review")
         return {
             "status": "needs_review",

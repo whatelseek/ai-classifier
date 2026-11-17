@@ -10,14 +10,14 @@ from app.llm.schemas import CLASSIFICATION_JSON_SCHEMA, LLMClassificationOutput
 def test_classification_schema_valid():
     obj = LLMClassificationOutput.model_validate(
         {
-            "function": "network",
+            "function": "it_infrastructure",
             "confidence": 0.9,
             "reason": "VPN issue",
             "alternatives": [{"function": "security", "score": 0.2}],
             "evidence": ["IPsec"],
         }
     )
-    assert obj.function == "network"
+    assert obj.function == "it_infrastructure"
 
 
 def _assert_strict_object(schema: dict) -> None:

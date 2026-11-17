@@ -5,8 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.config import SUPPORTED_FUNCTIONS
+from app.core.routing import normalize_routing_function
 
-SupportFunctionLiteral = Literal["network", "linux", "security", "database"]
+SupportFunctionLiteral = Literal["it_infrastructure", "security", "database"]
 
 
 class LLMAlternative(BaseModel):
@@ -27,7 +28,7 @@ class LLMClassificationOutput(BaseModel):
         evidence: Phrases supporting the decision.
     """
 
-    function: Literal["network", "linux", "security", "database", "needs_review"]
+    function: Literal["it_infrastructure", "security", "database", "needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1, max_length=240)
     alternatives: list[LLMAlternative] = Field(default_factory=list, max_length=2)
@@ -49,9 +50,10 @@ class LLMClassificationOutput(BaseModel):
         """
         if v == "needs_review":
             return v
-        if v not in SUPPORTED_FUNCTIONS:
+        normalized = normalize_routing_function(v)
+        if normalized not in SUPPORTED_FUNCTIONS:
             raise ValueError(f"Invalid function: {v}")
-        return v
+        return normalized
 
     @field_validator("alternatives")
     @classmethod
@@ -95,7 +97,7 @@ JOEY_CLASSIFICATION_JSON_SCHEMA: dict = {
     "properties": {
         "function": {
             "type": "string",
-            "enum": ["network", "linux", "security", "database", "needs_review"],
+            "enum": ["it_infrastructure", "security", "database", "needs_review"],
         },
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         "reason": {"type": "string", "maxLength": 240},

@@ -24,6 +24,10 @@ curl -sS -H 'Host: it-classifier.apps.vexa.home' \
 
 Return the API JSON to the user (or `function` + `confidence` only).
 
+## Labels
+
+Routing uses three teams: **`it_infrastructure`** (IT-infrastructure), **`security`**, **`database`**. Classification uses **description text only** (`CLASSIFY_DESCRIPTION_ONLY=true`); attachments are parsed but not sent to the scorer.
+
 ## Joey = Baseten Playground (score)
 
 In cluster, Joey routing uses **System One** (`JOEY_ROUTING_MODE=auto`) when `BASETEN_API_KEY` is set — same `state` + score question as Playground. Without the key, the service falls back to Spark vLLM `json_schema` (not Playground-identical). Check `GET /ready`: `joey_uses_systemone` must be `true` for parity.

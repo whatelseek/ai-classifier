@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import SUPPORTED_FUNCTIONS
 
-SupportFunction = Literal["network", "linux", "security", "database"]
+SupportFunction = Literal["it_infrastructure", "security", "database"]
 
 
 class ResponseStatus(str, Enum):
@@ -79,9 +79,10 @@ class FunctionsListResponse(BaseModel):
 
 
 FUNCTION_SCOPES: dict[str, str] = {
-    "network": "VPN, routing, DNS, BGP, VLAN, firewall connectivity, MikroTik, Check Point",
-    "linux": "Debian, Ubuntu, RHEL, SSH, systemd, Linux services, OS configuration",
-    "security": "SIEM, EDR, DLP, PAM, security incidents, security monitoring",
+    "it_infrastructure": (
+        "Network, Linux, mail, backup, Kubernetes, VPN, firewalls, OS and platform operations"
+    ),
+    "security": "SOC, phishing, EDR, SIEM, vulnerabilities, certificates, access incidents",
     "database": "PostgreSQL, Microsoft SQL Server, MySQL, replication, SQL performance",
 }
 

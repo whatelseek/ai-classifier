@@ -19,17 +19,23 @@ logger = logging.getLogger(__name__)
 
 # Heuristic patterns for offline / test mode when OpenAI is unavailable
 HEURISTIC_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(vpn|ipsec|bgp|vlan|dns|mikrotik|check\s*point|firewall)\b", re.IGNORECASE), "network"),
+    (
+        re.compile(
+            r"\b(vpn|ipsec|bgp|vlan|dns|mikrotik|check\s*point|firewall|"
+            r"systemd|ssh|ubuntu|debian|rhel|linux|kubernetes)\b",
+            re.IGNORECASE,
+        ),
+        "it_infrastructure",
+    ),
     (
         re.compile(
             r"\b(postgres|postgresql|mysql|mssql|sql\s*server|replication|wal|"
-            r"субд|баз[аы]\s+данн|индекс|резервн|репликац)\b",
+            r"субд|баз[аы]\s+данн|индекс|репликац)\b",
             re.IGNORECASE,
         ),
         "database",
     ),
-    (re.compile(r"\b(systemd|ssh|ubuntu|debian|rhel|linux)\b", re.IGNORECASE), "linux"),
-    (re.compile(r"\b(siem|edr|dlp|pam|security\s+incident|suspicious)\b", re.IGNORECASE), "security"),
+    (re.compile(r"\b(siem|edr|dlp|pam|security\s+incident|suspicious|phishing)\b", re.IGNORECASE), "security"),
 ]
 
 

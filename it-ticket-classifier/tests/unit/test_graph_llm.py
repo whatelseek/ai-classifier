@@ -71,7 +71,7 @@ def _state(**overrides: object) -> dict:
 
 def _ok(confidence: float = 0.91) -> LLMClassificationOutput:
     return LLMClassificationOutput(
-        function="network",
+        function="it_infrastructure",
         confidence=confidence,
         reason="VPN connectivity",
         alternatives=[],
@@ -89,7 +89,7 @@ async def test_mocked_llm_classifies_and_counts_tokens():
         config={"max_concurrency": 2},
     )
     assert result["status"] == "classified"
-    assert result["classification"]["function"] == "network"
+    assert result["classification"]["function"] == "it_infrastructure"
     assert result["llm_calls"] == 1
     assert result["token_usage"]["input"] == 10
     assert fake.feedback == [None]
@@ -101,7 +101,7 @@ async def test_invalid_output_retries_with_different_prompt():
     graph = build_classification_graph()
     result = await graph.ainvoke(_state(), context={"llm_client": fake})
     assert result["status"] == "classified"
-    assert result["classification"]["function"] == "network"
+    assert result["classification"]["function"] == "it_infrastructure"
     assert fake.feedback[0] in (None, "")
     assert fake.feedback[1]
     assert "could not be parsed" in fake.feedback[1]

@@ -29,7 +29,7 @@ async def test_health_ready_functions(app):
         assert ready.status_code == 200
         funcs = await client.get("/api/v1/functions")
         codes = {f["code"] for f in funcs.json()["functions"]}
-        assert codes == {"network", "linux", "security", "database"}
+        assert codes == {"it_infrastructure", "security", "database"}
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,7 @@ async def test_classify_text_network(app):
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] in ("classified", "needs_review")
-        assert body["classification"]["function"] in ("network", "needs_review")
+        assert body["classification"]["function"] in ("it_infrastructure", "needs_review")
 
 
 @pytest.mark.asyncio
@@ -57,7 +57,12 @@ async def test_score_endpoint_text_only(app):
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] in ("classified", "needs_review")
-        assert body["classification"]["function"] in ("network", "needs_review", "linux", "security", "database")
+        assert body["classification"]["function"] in (
+            "it_infrastructure",
+            "needs_review",
+            "security",
+            "database",
+        )
         assert body["processing"]["llm_calls"] in (0, 1)
 
 
@@ -139,7 +144,7 @@ async def test_concurrent_requests_keep_separate_results(app):
                 data={"description": "PostgreSQL replication is broken"},
             ),
         )
-    assert network.json()["classification"]["function"] == "network"
+    assert network.json()["classification"]["function"] == "it_infrastructure"
     assert database.json()["classification"]["function"] == "database"
     assert network.json()["request_id"] != database.json()["request_id"]
 
