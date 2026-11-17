@@ -56,15 +56,13 @@ A healthy answer has `answers.team.choice = "network"` and a probability well ab
 The Kubernetes deployment already does this (`k8s/deployment.yaml`):
 
 ```yaml
-JOEY_ROUTING_MODE: systemone
 JOEY_SYSTEMONE_URL: http://10.70.0.121:8003/v1/systemone
 JOEY_DECISION_MODEL: joey-1
-OPENAI_TEXT_MODEL: joey-1
 ```
 
 The question and the five class descriptions are `JOEY_ROUTE_INSTRUCTIONS` and `JOEY_CRITERIA_DATABASE`, `JOEY_CRITERIA_SECURITY`, `JOEY_CRITERIA_NETWORK`, `JOEY_CRITERIA_IT_INFRASTRUCTURE`, `JOEY_CRITERIA_UNCLASSIFIED` in the same deployment. Editing them and restarting the pod changes routing; Joey does not need a restart, and the image does not need a rebuild. Unset, the process uses the wording that scored 80.1%. One ticket per class, with the answers that wording returns, is in [baseten-joey-scoring.md](baseten-joey-scoring.md).
 
-There is no `OPENAI_BASE_URL`. The classifier selects this path when `JOEY_SYSTEMONE_URL` is set and the text model name contains `joey`. `GET /ready` then reports `joey_uses_systemone: true`. No API key is sent to the self-hosted server.
+The classifier calls that URL and no other model endpoint. `GET /ready` reports `joey_uses_systemone: true` when the URL is set. No API key is sent to the self-hosted server. The description is masked (secrets, and private IPs while `MASK_INTERNAL_HOSTS` is true) before it is sent.
 
 Redeploy the classifier with `scripts/deploy-k8s.sh` only when the API image itself changed. Restarting Joey does not require a new classifier image.
 
@@ -72,4 +70,4 @@ Baseten uses the same request with a different URL and model id. See [baseten-jo
 
 ## What is left of the old server
 
-The vLLM container `vllm_joey` on spark1 port 8001 (`Joey-1-Local`) cannot serve this model. The Envoy route that used to proxy it (`AIGatewayRoute/spark-joey` in `ai-platform`) was removed, so `x-ai-eg-model: Joey-1-Local` returns 404 at the gateway. The container is unused; stopping it does not affect classification, and starting it again does not produce a working Joey.
+The vLLM container `vllm_joey` on spark1 port 8001 (`Joey-1-Local`) cannot serve this model. The Envoy route that used to proxy it (`AIGatewayRoute/spark-joey` in `ai-platform`) was removed, so `x-ai-eg-model: Joey-1-Local` returns 404 at the gateway. The container is stopped; it was holding about 64 GB of GPU memory, and starting it again does not produce a working Joey. `docling-serve` on port 8002 is stopped too. The classifier does not read attachments, so nothing calls it.

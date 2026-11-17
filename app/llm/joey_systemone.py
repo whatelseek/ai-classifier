@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -12,20 +13,55 @@ from app.llm.schemas import LLMAlternative, LLMClassificationOutput
 
 logger = logging.getLogger(__name__)
 
+# One client for the process. A new TCP connection per ticket costs more than the
+# classification code around it, and Joey is called once per request.
+_shared: httpx.AsyncClient | None = None
+
+
+@dataclass
+class LLMUsageTracker:
+    """Per-request call count and token totals reported by System One."""
+
+    llm_calls: int = 0
+    token_usage: dict[str, int] = field(default_factory=lambda: {"input": 0, "output": 0, "total": 0})
+
+    def record_usage(self, usage: dict[str, Any]) -> None:
+        """Add one System One ``usage`` block."""
+        self.llm_calls += 1
+        incoming = int(usage.get("input_tokens") or 0)
+        outgoing = int(usage.get("output_tokens") or 0)
+        self.token_usage["input"] += incoming
+        self.token_usage["output"] += outgoing
+        self.token_usage["total"] += incoming + outgoing
+
+
+def shared_client() -> httpx.AsyncClient:
+    """Return the process-wide client, opening it on first use."""
+    global _shared
+    if _shared is None or _shared.is_closed:
+        _shared = httpx.AsyncClient(
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _shared
+
+
+def reset_shared_client() -> None:
+    """Drop the cached client so the next call builds a new one. Used by tests."""
+    global _shared
+    _shared = None
+
+
+async def aclose_shared_client() -> None:
+    """Close the cached client. Called from the application lifespan."""
+    global _shared
+    client = _shared
+    _shared = None
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
 
 def _settings(settings: Settings | None) -> Settings:
     return get_settings() if settings is None else settings
-
-
-def build_decision_state(body: str, merged_context: str) -> str:
-    """Plain ``state`` string: the ticket text only."""
-    parts: list[str] = []
-    if (body or "").strip():
-        parts.append(body.strip())
-    merged = (merged_context or "").strip()
-    if merged and merged != "(none)":
-        parts.append(merged)
-    return "\n\n".join(parts) if parts else "(empty)"
 
 
 def build_route_questions(settings: Settings | None = None) -> dict[str, Any]:
@@ -50,11 +86,12 @@ def parse_choice_answer(
     """Map a System One choice answer to ``LLMClassificationOutput``.
 
     ``confidence`` is the winning option's probability. Probabilities for labels outside
-    ``criteria`` are ignored.
+    ``criteria`` are ignored. The winning label is returned as is, including a low probability:
+    ``unclassified`` is an option the model picks, not a threshold applied afterwards.
     """
     allowed = criteria if criteria is not None else _settings(None).joey_route_criteria
     raw_probs: dict[str, Any] = answer.get("probabilities") or {}
-    probs = {str(k): float(v) for k, v in raw_probs.items() if str(k) in allowed}
+    probs = {str(key): float(value) for key, value in raw_probs.items() if str(key) in allowed}
     if not probs:
         raise ValueError("Missing probabilities in choice answer")
 
@@ -78,7 +115,7 @@ def parse_choice_answer(
 async def classify_via_systemone(
     settings: Settings,
     state: str,
-    usage_tracker: Any,
+    usage_tracker: LLMUsageTracker,
 ) -> LLMClassificationOutput:
     """POST the routing question to a System One endpoint and parse the answer."""
     url = (settings.joey_systemone_url or "").rstrip("/")
@@ -98,27 +135,20 @@ async def classify_via_systemone(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    timeout = httpx.Timeout(settings.openai_timeout_seconds)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-        data = response.json()
+    timeout = httpx.Timeout(settings.joey_timeout_seconds)
+    response = await shared_client().post(url, json=payload, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
 
     usage = data.get("usage") or {}
-    if hasattr(usage_tracker, "record_systemone"):
-        usage_tracker.record_systemone(usage)
+    if hasattr(usage_tracker, "record_usage"):
+        usage_tracker.record_usage(usage)
     elif hasattr(usage_tracker, "llm_calls"):
         usage_tracker.llm_calls += 1
-        if hasattr(usage_tracker, "token_usage"):
-            usage_tracker.token_usage["input"] += int(usage.get("input_tokens") or 0)
-            usage_tracker.token_usage["output"] += int(usage.get("output_tokens") or 0)
-            usage_tracker.token_usage["total"] += int(usage.get("input_tokens") or 0) + int(
-                usage.get("output_tokens") or 0
-            )
 
     answers = data.get("answers") or {}
     route = answers.get("route")
     if not isinstance(route, dict):
-        raise ValueError("System One response missing answers.route")
+        raise TypeError("System One response missing answers.route")
 
     return parse_choice_answer(route, criteria)

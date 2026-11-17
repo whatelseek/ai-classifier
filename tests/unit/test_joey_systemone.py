@@ -8,11 +8,12 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 from app.llm import joey_systemone
-from app.llm.client import LLMUsageTracker
 from app.llm.joey_systemone import (
+    LLMUsageTracker,
     build_route_questions,
     classify_via_systemone,
     parse_choice_answer,
+    reset_shared_client,
 )
 
 
@@ -80,12 +81,8 @@ def test_systemone_needs_only_a_url():
     local = Settings(_env_file=None, JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone")
     assert local.joey_uses_systemone
     assert local.resolved_systemone_api_key is None
+    assert local.joey_decision_model == "joey-1"
     assert not Settings(_env_file=None).joey_uses_systemone
-    assert not Settings(
-        _env_file=None,
-        JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone",
-        JOEY_ROUTING_MODE="vllm_json",
-    ).joey_uses_systemone
 
 
 async def _post_recording(monkeypatch, settings: Settings) -> httpx.Request:
@@ -111,6 +108,7 @@ async def _post_recording(monkeypatch, settings: Settings) -> httpx.Request:
         "AsyncClient",
         lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
     )
+    reset_shared_client()
     usage = LLMUsageTracker()
     out = await classify_via_systemone(settings, "много failed password в логах", usage)
     assert out.function == "security"
@@ -162,3 +160,39 @@ async def test_question_and_criteria_come_from_env(monkeypatch):
         "it_infrastructure": "servers and mail",
         "unclassified": "not an IT problem",
     }
+
+
+async def test_http_client_is_reused(monkeypatch):
+    created: list[httpx.AsyncClient] = []
+    real_client = httpx.AsyncClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "answers": {
+                    "route": {
+                        "type": "choice",
+                        "choice": "network",
+                        "probabilities": {"network": 0.9, "database": 0.1},
+                    }
+                },
+                "usage": {"input_tokens": 4, "output_tokens": 1},
+            },
+        )
+
+    def factory(**kwargs):
+        client = real_client(transport=httpx.MockTransport(handler), **kwargs)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(joey_systemone.httpx, "AsyncClient", factory)
+    reset_shared_client()
+    settings = Settings(_env_file=None, JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone")
+    usage = LLMUsageTracker()
+    first = await classify_via_systemone(settings, "vpn", usage)
+    second = await classify_via_systemone(settings, "vpn again", usage)
+    assert first.function == "network"
+    assert second.function == "network"
+    assert len(created) == 1
+    assert usage.llm_calls == 2

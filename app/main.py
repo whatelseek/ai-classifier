@@ -1,7 +1,4 @@
-"""FastAPI application entrypoint for the IT ticket classifier.
-
-Exposes the HTTP API and wires logging, settings, and route registration.
-"""
+"""FastAPI application entrypoint for the IT ticket classifier."""
 
 from contextlib import asynccontextmanager
 
@@ -11,37 +8,31 @@ from app import __version__
 from app.api.routes import router
 from app.core.config import get_settings
 from app.core.logging import setup_logging
+from app.llm.joey_systemone import aclose_shared_client
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Prepare runtime resources on startup and release them on shutdown.
-
-    Args:
-        _app: FastAPI application instance (unused).
-    """
-    settings = get_settings()
-    settings.temp_dir.mkdir(parents=True, exist_ok=True)
+    """Close the shared Joey client when the process stops."""
     yield
+    await aclose_shared_client()
 
 
 def create_app() -> FastAPI:
-    """Build and configure the FastAPI application.
-
-    Returns:
-        Configured FastAPI app with routes, logging, and lifespan hooks.
-    """
+    """Build the FastAPI application."""
     settings = get_settings()
     setup_logging(settings.log_level, settings.log_json)
-
-    app = FastAPI(
+    application = FastAPI(
         title="IT Ticket Classifier",
         version=__version__,
-        description="IT support ticket routing scorer (structured classification only)",
+        description=(
+            "Routes an IT ticket description to database, security, network, "
+            "it_infrastructure, or unclassified."
+        ),
         lifespan=lifespan,
     )
-    app.include_router(router)
-    return app
+    application.include_router(router)
+    return application
 
 
 app = create_app()

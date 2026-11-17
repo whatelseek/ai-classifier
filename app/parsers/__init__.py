@@ -1,1 +1,0 @@
-"""Attachment format parsers (documents, images, diagrams, and text)."""

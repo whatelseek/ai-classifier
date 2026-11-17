@@ -1,52 +1,28 @@
-"""FastAPI dependency providers for settings, graph, LLM, and concurrency."""
+"""FastAPI dependency providers for settings, the classifier, and concurrency."""
 
 import asyncio
 
+from fastapi import Depends
+
 from app.core.config import Settings, get_settings
-from app.graph.builder import get_graph
-from app.llm.client import OpenAIClassificationClient
+from app.services.classifier import ClassificationService
 
 _request_semaphore: asyncio.Semaphore | None = None
 
 
 def get_app_settings() -> Settings:
-    """Return cached application settings for dependency injection.
-
-    Returns:
-        Singleton ``Settings`` instance loaded from environment.
-    """
+    """Return cached application settings."""
     return get_settings()
 
 
-def get_classification_graph():
-    """Return the compiled LangGraph workflow.
-
-    Returns:
-        Compiled graph ready for ``ainvoke`` / ``invoke``.
-    """
-    return get_graph()
-
-
-def get_llm_client(settings: Settings | None = None) -> OpenAIClassificationClient:
-    """Construct an LLM client for classification and vision tasks.
-
-    Args:
-        settings: Optional settings override; defaults to global settings.
-
-    Returns:
-        Client configured for the OpenAI Responses API.
-    """
-    return OpenAIClassificationClient(settings or get_settings())
+def get_service(settings: Settings = Depends(get_app_settings)) -> ClassificationService:
+    """Build the classifier for this request. The Joey HTTP client is shared."""
+    return ClassificationService(settings)
 
 
 def get_request_semaphore() -> asyncio.Semaphore:
-    """Return a process-wide semaphore limiting concurrent classify requests.
-
-    Returns:
-        Semaphore sized from ``MAX_CONCURRENT_REQUESTS``.
-    """
+    """Limit how many classifications run at once."""
     global _request_semaphore
     if _request_semaphore is None:
-        settings = get_settings()
-        _request_semaphore = asyncio.Semaphore(settings.max_concurrent_requests)
+        _request_semaphore = asyncio.Semaphore(get_settings().max_concurrent_requests)
     return _request_semaphore
