@@ -1,7 +1,9 @@
 """OpenAI Responses API client for classification and vision inference."""
 
 import base64
+import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -152,12 +154,14 @@ class OpenAIClassificationClient:
                         "schema": CLASSIFICATION_JSON_SCHEMA,
                     },
                 },
+                max_tokens=1024,
+                temperature=0.0,
             )
             usage.record(response.usage)
             raw = (response.choices[0].message.content or "").strip()
             if not raw:
                 raise TypeError("Empty model response")
-            parsed = LLMClassificationOutput.model_validate_json(raw)
+            parsed = _parse_classification_json(raw)
         else:
             response = await self._client.responses.parse(
                 model=self._settings.openai_text_model,
@@ -229,6 +233,55 @@ class OpenAIClassificationClient:
         )
         usage.record(response.usage)
         return _extract_output_text(response) or ""
+
+
+def _parse_classification_json(raw: str) -> LLMClassificationOutput:
+    """Parse model JSON, tolerating trailing junk from smaller local models."""
+    try:
+        return LLMClassificationOutput.model_validate_json(raw)
+    except ValueError:
+        salvaged = _salvage_classification_json(raw)
+        if salvaged is not None:
+            return salvaged
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if not match:
+            raise
+        snippet = match.group(0)
+        cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", snippet)
+        try:
+            return LLMClassificationOutput.model_validate(json.loads(cleaned))
+        except (ValueError, json.JSONDecodeError):
+            salvaged = _salvage_classification_json(cleaned)
+            if salvaged is not None:
+                return salvaged
+            raise
+
+
+def _salvage_classification_json(raw: str) -> LLMClassificationOutput | None:
+    """Recover classification when vLLM returns truncated JSON."""
+    func_match = re.search(
+        r'"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"',
+        raw,
+        re.IGNORECASE,
+    )
+    if not func_match:
+        return None
+    func = func_match.group("func").lower()
+    confidence = 0.65
+    conf_match = re.search(r'"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)', raw)
+    if conf_match:
+        confidence = float(conf_match.group("c"))
+    reason = "Recovered from partial model JSON (truncated structured output)"
+    reason_match = re.search(r'"reason"\s*:\s*"(?P<r>(?:\\.|[^"\\])*)"', raw, re.DOTALL)
+    if reason_match:
+        reason = reason_match.group("r").replace('\\"', '"')[:2000]
+    return LLMClassificationOutput(
+        function=func,  # type: ignore[arg-type]
+        confidence=confidence,
+        reason=reason,
+        alternatives=[],
+        evidence=[],
+    )
 
 
 def _extract_output_text(response: Any) -> str:
