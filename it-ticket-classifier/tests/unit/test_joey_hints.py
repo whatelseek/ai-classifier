@@ -33,3 +33,18 @@ def test_postgres_keeps_database_when_no_security_signal():
     body = "Плановое обслуживание PostgreSQL и проверка репликации"
     out = adjust_joey_classification(body, _database_pad())
     assert out.function == "database"
+
+
+def test_disk_full_maps_to_it_infrastructure():
+    out = adjust_joey_classification("на сервере закончилось место на диске /var", _database_pad())
+    assert out.function == "it_infrastructure"
+
+
+def test_padded_database_without_evidence_is_unclassified():
+    out = adjust_joey_classification("Помогите пожалуйста", _database_pad())
+    assert out.function == "needs_review"
+
+
+def test_postgres_on_server_stays_database():
+    out = adjust_joey_classification("ошибка на сервере PostgreSQL", _database_pad())
+    assert out.function == "database"

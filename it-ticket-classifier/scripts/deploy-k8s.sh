@@ -11,6 +11,8 @@ docker push "$IMAGE"
 
 kubectl apply -f "$ROOT/k8s/deployment.yaml"
 kubectl -n it-classifier set image deploy/it-ticket-classifier api="${IMAGE}"
+# Same tag is reused on every push, so force a new pod to pull it.
+kubectl -n it-classifier rollout restart deploy/it-ticket-classifier
 kubectl -n it-classifier rollout status deploy/it-ticket-classifier --timeout=600s
 
 echo
