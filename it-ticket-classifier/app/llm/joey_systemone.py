@@ -1,4 +1,4 @@
-"""Joey decision routing via Baseten System One (Playground score / choice API)."""
+"""Joey decision routing via the System One API (self-hosted qev server on Spark, or Baseten)."""
 
 from __future__ import annotations
 
@@ -7,17 +7,43 @@ from typing import Any
 
 import httpx
 
-from app.core.config import SUPPORTED_FUNCTIONS, Settings
+from app.core.config import SUPPORTED_FUNCTIONS, UNCLASSIFIED, Settings
 from app.llm.schemas import LLMAlternative, LLMClassificationOutput
 
 logger = logging.getLogger(__name__)
 
-PLAYGROUND_SCORE_INSTRUCTIONS = "К какой категории относится обращение?"
-PLAYGROUND_SCORE_LEVELS: tuple[str, ...] = SUPPORTED_FUNCTIONS
+ROUTE_INSTRUCTIONS = "Какая команда поддержки должна обработать это обращение?"
+
+# Option name -> what the team handles. Joey scores each option by its description, so the
+# descriptions carry the routing policy; team names alone route noticeably worse.
+ROUTE_CRITERIA: dict[str, str] = {
+    "database": (
+        "Базы данных и СУБД (PostgreSQL, MySQL, Oracle, MS SQL, ClickHouse): запросы, "
+        "производительность, репликация, блокировки, схемы и данные в БД"
+    ),
+    "security": (
+        "Информационная безопасность: антивирусная защита и вредоносное ПО, управление "
+        "уязвимостями и отчёты сканеров, фишинг и почтовая безопасность, социальная инженерия, "
+        "учётные записи (блокировки, подбор паролей), утечка секретов и паролей, утеря или кража "
+        "устройств, доступ к системам с персональными данными, подозрительная активность на серверах"
+    ),
+    "network": (
+        "Сеть: VPN и удалённый доступ, межсетевые экраны, открытие портов и сетевых доступов "
+        "между сервисами, маршрутизация, DNS"
+    ),
+    "it_infrastructure": (
+        "ИТ-инфраструктура: серверы Linux (место на диске, нагрузка, SSH-доступ), Kubernetes, "
+        "резервное копирование и восстановление файлов, корпоративная почта, TLS-сертификаты, "
+        "файловые ресурсы и общие папки"
+    ),
+    UNCLASSIFIED: (
+        "Обращение не относится к ИТ-поддержке или из текста невозможно понять, в чём проблема"
+    ),
+}
 
 
 def build_decision_state(body: str, merged_context: str) -> str:
-    """Plain ``state`` string as in Baseten Playground (ticket text only)."""
+    """Plain ``state`` string: the ticket text only."""
     parts: list[str] = []
     if (body or "").strip():
         parts.append(body.strip())
@@ -27,50 +53,39 @@ def build_decision_state(body: str, merged_context: str) -> str:
     return "\n\n".join(parts) if parts else "(empty)"
 
 
-def build_playground_score_questions() -> dict[str, Any]:
-    """Score question matching Playground: ordered levels lowest → highest."""
+def build_route_questions() -> dict[str, Any]:
+    """One ``choice`` question: the four teams plus an explicit ``unclassified`` option."""
     return {
         "route": {
-            "type": "score",
-            "instructions": PLAYGROUND_SCORE_INSTRUCTIONS,
-            "criteria": list(PLAYGROUND_SCORE_LEVELS),
+            "type": "choice",
+            "instructions": ROUTE_INSTRUCTIONS,
+            "criteria": dict(ROUTE_CRITERIA),
         }
     }
 
 
-def parse_score_answer(
-    answer: dict[str, Any],
-    levels: tuple[str, ...] = PLAYGROUND_SCORE_LEVELS,
-) -> LLMClassificationOutput:
-    """Map System One score ``probabilities`` to ``LLMClassificationOutput``."""
-    raw_probs: dict[str, float] = answer.get("probabilities") or {}
-    if not raw_probs:
-        raise ValueError("Missing probabilities in score answer")
+def parse_choice_answer(answer: dict[str, Any]) -> LLMClassificationOutput:
+    """Map a System One choice answer to ``LLMClassificationOutput``.
 
-    indexed = {int(k): float(v) for k, v in raw_probs.items()}
-    winner_idx = max(indexed, key=indexed.get)
-    if winner_idx < 0 or winner_idx >= len(levels):
-        raise ValueError(f"Score level index out of range: {winner_idx}")
+    ``confidence`` is the winning option's probability.
+    """
+    raw_probs: dict[str, Any] = answer.get("probabilities") or {}
+    probs = {str(k): float(v) for k, v in raw_probs.items() if str(k) in ROUTE_CRITERIA}
+    if not probs:
+        raise ValueError("Missing probabilities in choice answer")
 
-    function = levels[winner_idx]
-    top_prob = indexed[winner_idx]
-    conf = float(answer.get("confidence", top_prob))
-    conf = max(0.0, min(1.0, conf))
+    ranked = sorted(probs.items(), key=lambda item: item[1], reverse=True)
+    winner, top_prob = ranked[0]
+    alternatives = [
+        LLMAlternative(function=name, score=max(0.0, min(1.0, prob)))  # type: ignore[arg-type]
+        for name, prob in ranked[1:]
+        if name in SUPPORTED_FUNCTIONS
+    ][:2]
 
-    ranked = sorted(indexed.items(), key=lambda x: x[1], reverse=True)
-    alternatives: list[LLMAlternative] = []
-    for idx, prob in ranked[1:3]:
-        if 0 <= idx < len(levels):
-            alternatives.append(LLMAlternative(function=levels[idx], score=prob))  # type: ignore[arg-type]
-
-    reason = (
-        f"Joey score routing ({PLAYGROUND_SCORE_INSTRUCTIONS}); "
-        f"top={function} p={top_prob:.3f}"
-    )
     return LLMClassificationOutput(
-        function=function,  # type: ignore[arg-type]
-        confidence=conf,
-        reason=reason[:240],
+        function=winner,  # type: ignore[arg-type]
+        confidence=max(0.0, min(1.0, top_prob)),
+        reason=f"Joey choice routing; top={winner} p={top_prob:.3f}",
         alternatives=alternatives,
         evidence=[],
     )
@@ -81,24 +96,22 @@ async def classify_via_systemone(
     state: str,
     usage_tracker: Any,
 ) -> LLMClassificationOutput:
-    """POST /v1/systemone — same semantics as Baseten Joey Playground score."""
+    """POST the routing question to a System One endpoint and parse the answer."""
     url = (settings.joey_systemone_url or "").rstrip("/")
     if not url:
         raise RuntimeError("JOEY_SYSTEMONE_URL is not configured")
-    api_key = settings.resolved_systemone_api_key
-    if not api_key:
-        raise RuntimeError("JOEY_SYSTEMONE_API_KEY / BASETEN_API_KEY is not configured")
 
     payload = {
         "model": settings.joey_decision_model,
         "service_tier": "default",
         "state": state,
-        "questions": build_playground_score_questions(),
+        "questions": build_route_questions(),
     }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    # The self-hosted qev server takes no key; Baseten needs one.
+    api_key = settings.resolved_systemone_api_key
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     timeout = httpx.Timeout(settings.openai_timeout_seconds)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -123,4 +136,4 @@ async def classify_via_systemone(
     if not isinstance(route, dict):
         raise ValueError("System One response missing answers.route")
 
-    return parse_score_answer(route)
+    return parse_choice_answer(route)

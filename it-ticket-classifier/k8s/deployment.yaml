@@ -23,8 +23,6 @@ metadata:
   name: it-ticket-classifier
   namespace: it-classifier
 type: Opaque
-# BASETEN_API_KEY: add via `kubectl -n it-classifier create secret generic it-ticket-classifier \
-#   --from-literal=OPENAI_API_KEY=dummy --from-literal=BASETEN_API_KEY=<key> --dry-run=client -o yaml | kubectl apply -f -`
 stringData:
   OPENAI_API_KEY: "dummy"
 ---
@@ -64,18 +62,13 @@ spec:
                   key: OPENAI_API_KEY
             - name: OPENAI_BASE_URL
               value: http://envoy.apps.vexa.home/v1
+            # joey-1 on spark1 served by the qev runtime (services/joey-qev-server), not vLLM.
             - name: JOEY_ROUTING_MODE
-              value: "auto"
+              value: "systemone"
             - name: JOEY_SYSTEMONE_URL
-              value: "https://inference.baseten.co/v1/systemone"
+              value: "http://10.70.0.121:8003/v1/systemone"
             - name: JOEY_DECISION_MODEL
-              value: "decision-models/baseten-joey-2b-latest"
-            - name: BASETEN_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: it-ticket-classifier
-                  key: BASETEN_API_KEY
-                  optional: true
+              value: "joey-1"
             - name: OPENAI_TEXT_MODEL
               value: Joey-1-Local
             - name: OPENAI_VISION_MODEL

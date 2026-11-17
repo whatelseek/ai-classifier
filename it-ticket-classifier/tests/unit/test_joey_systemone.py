@@ -1,22 +1,133 @@
-"""System One score parsing (Baseten Playground parity)."""
+"""System One routing question and answer parsing."""
 
-from app.llm.joey_systemone import build_playground_score_questions, parse_score_answer
+import httpx
+import pytest
+
+from app.core.config import Settings
+from app.llm import joey_systemone
+from app.llm.client import LLMUsageTracker
+from app.llm.joey_systemone import (
+    ROUTE_CRITERIA,
+    build_route_questions,
+    classify_via_systemone,
+    parse_choice_answer,
+)
 
 
-def test_playground_question_shape():
-    q = build_playground_score_questions()["route"]
-    assert q["type"] == "score"
-    assert q["instructions"] == "К какой категории относится обращение?"
-    assert q["criteria"] == ["database", "security", "network", "it_infrastructure"]
+def test_route_question_is_choice_over_teams_and_unclassified():
+    q = build_route_questions()["route"]
+    assert q["type"] == "choice"
+    assert list(q["criteria"]) == [
+        "database",
+        "security",
+        "network",
+        "it_infrastructure",
+        "unclassified",
+    ]
+    assert all(isinstance(v, str) and v for v in q["criteria"].values())
 
 
-def test_parse_score_antivirus_like_playground():
+def test_parse_choice_picks_top_team():
     answer = {
-        "type": "score",
-        "score": 0.33,
-        "confidence": 0.97,
-        "probabilities": {"0": 0.005, "1": 0.985, "2": 0.005, "3": 0.005},
+        "type": "choice",
+        "choice": "network",
+        "probabilities": {
+            "database": 0.01,
+            "security": 0.04,
+            "network": 0.80,
+            "it_infrastructure": 0.12,
+            "unclassified": 0.03,
+        },
+        "confidence": 0.75,
     }
-    out = parse_score_answer(answer)
+    out = parse_choice_answer(answer)
+    assert out.function == "network"
+    assert out.confidence == pytest.approx(0.80)
+    assert [a.function for a in out.alternatives] == ["it_infrastructure", "security"]
+
+
+def test_parse_choice_unclassified_becomes_needs_review():
+    answer = {
+        "type": "choice",
+        "choice": "unclassified",
+        "probabilities": {
+            "database": 0.01,
+            "security": 0.01,
+            "network": 0.01,
+            "it_infrastructure": 0.02,
+            "unclassified": 0.95,
+        },
+    }
+    out = parse_choice_answer(answer)
+    assert out.function == "needs_review"
+    assert out.confidence == pytest.approx(0.95)
+    assert all(a.function != "unclassified" for a in out.alternatives)
+
+
+def test_parse_choice_without_probabilities_fails():
+    with pytest.raises(ValueError):
+        parse_choice_answer({"type": "choice", "choice": "security"})
+
+
+def test_systemone_needs_only_a_url():
+    local = Settings(_env_file=None, JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone")
+    assert local.joey_uses_systemone
+    assert local.resolved_systemone_api_key is None
+    assert not Settings(_env_file=None).joey_uses_systemone
+    assert not Settings(
+        _env_file=None,
+        JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone",
+        JOEY_ROUTING_MODE="vllm_json",
+    ).joey_uses_systemone
+
+
+async def _post_recording(monkeypatch, settings: Settings) -> httpx.Request:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        probs = {name: 0.02 for name in ROUTE_CRITERIA}
+        probs["security"] = 0.92
+        return httpx.Response(
+            200,
+            json={
+                "answers": {
+                    "route": {"type": "choice", "choice": "security", "probabilities": probs}
+                },
+                "usage": {"input_tokens": 120, "output_tokens": 1},
+            },
+        )
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        joey_systemone.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    usage = LLMUsageTracker()
+    out = await classify_via_systemone(settings, "много failed password в логах", usage)
     assert out.function == "security"
-    assert out.confidence >= 0.9
+    assert usage.llm_calls == 1
+    assert usage.token_usage["input"] == 120
+    return seen[0]
+
+
+async def test_local_endpoint_gets_no_authorization_header(monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        JOEY_SYSTEMONE_URL="http://spark:8003/v1/systemone",
+        JOEY_DECISION_MODEL="joey-1",
+    )
+    request = await _post_recording(monkeypatch, settings)
+    assert "authorization" not in request.headers
+    assert str(request.url) == "http://spark:8003/v1/systemone"
+
+
+async def test_api_key_is_sent_as_bearer(monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        JOEY_SYSTEMONE_URL="https://inference.baseten.co/v1/systemone",
+        BASETEN_API_KEY="k-123",
+    )
+    request = await _post_recording(monkeypatch, settings)
+    assert request.headers["authorization"] == "Bearer k-123"

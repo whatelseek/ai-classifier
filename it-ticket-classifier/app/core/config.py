@@ -50,7 +50,8 @@ class Settings(BaseSettings):
     classify_description_only: bool = Field(default=True, alias="CLASSIFY_DESCRIPTION_ONLY")
     # One structured classify call; no vision completions, no confidence retry loops.
     classification_scoring_only: bool = Field(default=True, alias="CLASSIFICATION_SCORING_ONLY")
-    # Joey: systemone = Baseten Playground score API; vllm_json = legacy chat+json_schema on Spark.
+    # Joey is a decision model and only answers through the System One API (qev server on Spark,
+    # or Baseten). vllm_json = chat+json_schema, which joey-1 cannot do; kept for other models.
     joey_routing_mode: str = Field(default="auto", alias="JOEY_ROUTING_MODE")
     joey_systemone_url: str | None = Field(
         default=None,
@@ -92,14 +93,14 @@ class Settings(BaseSettings):
 
     @property
     def joey_uses_systemone(self) -> bool:
-        """True when routing should use decision/score API like Baseten Playground."""
+        """True when routing goes through a System One endpoint.
+
+        The API key is optional: the self-hosted qev server takes none.
+        """
         mode = (self.joey_routing_mode or "auto").strip().lower()
         if mode == "vllm_json":
             return False
-        if mode == "systemone":
-            return bool(self.joey_systemone_url and self.resolved_systemone_api_key)
-        # auto: prefer systemone when URL + key are set
-        return bool(self.joey_systemone_url and self.resolved_systemone_api_key)
+        return bool(self.joey_systemone_url and self.joey_systemone_url.strip())
 
     @property
     def resolved_systemone_api_key(self) -> str | None:
