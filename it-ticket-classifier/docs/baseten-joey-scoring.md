@@ -2,6 +2,26 @@
 
 Use this when you need the same **four-way score** as `POST /api/v1/classify`, without actions or custom downstream code.
 
+## Production (`it-classifier` = Playground)
+
+Spark **vLLM chat + `json_schema`** is not the same runtime as Baseten **System One / score**.
+To match Playground, set:
+
+```bash
+JOEY_ROUTING_MODE=auto          # or systemone
+JOEY_SYSTEMONE_URL=https://inference.baseten.co/v1/systemone
+BASETEN_API_KEY=<your key>
+JOEY_DECISION_MODEL=decision-models/baseten-joey-2b-latest
+```
+
+The classifier sends:
+
+- `state` — ticket body (+ attachment text), same as Playground **STATE**
+- `questions.route` — `type: score`, instructions `К какой категории относится обращение?`
+- `criteria` — `network`, `linux`, `security`, `database` (low → high)
+
+Winner = level with highest `probabilities`. Without `BASETEN_API_KEY`, `auto` falls back to Spark vLLM JSON (legacy).
+
 ## Playground setup
 
 1. Open **Baseten → Joey 1 → Playground**.

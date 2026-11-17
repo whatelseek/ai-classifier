@@ -24,6 +24,7 @@ from app.llm.schemas import (
     LLMClassificationOutput,
 )
 from app.llm.joey_hints import adjust_joey_classification
+from app.llm.joey_systemone import build_decision_state, classify_via_systemone
 from app.llm.ticket_body import extract_request_body
 
 logger = logging.getLogger(__name__)
@@ -104,7 +105,10 @@ class OpenAIClassificationClient:
 
     @property
     def is_available(self) -> bool:
-        """Return True when the underlying HTTP client was constructed."""
+        """Return True when Joey System One or OpenAI client is configured."""
+        use_joey = "joey" in (self._settings.openai_text_model or "").lower()
+        if use_joey and self._settings.joey_uses_systemone:
+            return True
         return self._client is not None
 
     async def classify(
@@ -137,14 +141,18 @@ class OpenAIClassificationClient:
             RuntimeError: When no API key is configured.
             TypeError: When the model returns an empty parsed payload.
         """
-        if not self._client:
-            raise RuntimeError("OpenAI API key is not configured")
-
         body = description
         if self._settings.classify_extract_request_body:
             body = extract_request_body(description)
 
         use_joey = "joey" in (self._settings.openai_text_model or "").lower()
+        if use_joey and self._settings.joey_uses_systemone:
+            state = build_decision_state(body, merged_context or "")
+            return await classify_via_systemone(self._settings, state, usage)
+
+        if not self._client:
+            raise RuntimeError("OpenAI API key is not configured")
+
         if use_joey:
             system_prompt = JOEY_CLASSIFICATION_SYSTEM_PROMPT
             user_content = build_joey_user_content(

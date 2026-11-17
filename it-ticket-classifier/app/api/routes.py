@@ -45,6 +45,9 @@ async def ready(settings: Settings = Depends(get_app_settings)) -> dict[str, str
     return {
         "status": "ready",
         "openai_configured": settings.openai_configured,
+        "joey_routing_mode": settings.joey_routing_mode,
+        "joey_uses_systemone": settings.joey_uses_systemone,
+        "joey_decision_model": settings.joey_decision_model,
     }
 
 

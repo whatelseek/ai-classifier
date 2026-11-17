@@ -187,7 +187,11 @@ class ClassificationService:
                     if result.function == "needs_review"
                     else ResponseStatus.classified
                 )
-                model = self._settings.openai_text_model
+                model = (
+                    self._settings.joey_decision_model
+                    if self._settings.joey_uses_systemone
+                    else self._settings.openai_text_model
+                )
             else:
                 raw = _heuristic_classify(description, "")
                 classification = ClassificationResult.model_validate(raw)

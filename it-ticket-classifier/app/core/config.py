@@ -47,6 +47,18 @@ class Settings(BaseSettings):
     classify_extract_request_body: bool = Field(default=True, alias="CLASSIFY_EXTRACT_REQUEST_BODY")
     # One structured classify call; no vision completions, no confidence retry loops.
     classification_scoring_only: bool = Field(default=True, alias="CLASSIFICATION_SCORING_ONLY")
+    # Joey: systemone = Baseten Playground score API; vllm_json = legacy chat+json_schema on Spark.
+    joey_routing_mode: str = Field(default="auto", alias="JOEY_ROUTING_MODE")
+    joey_systemone_url: str | None = Field(
+        default=None,
+        alias="JOEY_SYSTEMONE_URL",
+    )
+    joey_systemone_api_key: str | None = Field(default=None, alias="JOEY_SYSTEMONE_API_KEY")
+    baseten_api_key: str | None = Field(default=None, alias="BASETEN_API_KEY")
+    joey_decision_model: str = Field(
+        default="decision-models/baseten-joey-2b-latest",
+        alias="JOEY_DECISION_MODEL",
+    )
 
     max_file_size_bytes: int = Field(default=20 * 1024 * 1024, alias="MAX_FILE_SIZE_BYTES")
     max_attachments: int = Field(default=10, alias="MAX_ATTACHMENTS")
@@ -68,12 +80,31 @@ class Settings(BaseSettings):
         """Whether LLM calls can be made (API key and/or OpenAI-compatible proxy)."""
         has_key = bool(self.openai_api_key and self.openai_api_key.strip())
         has_proxy = bool(self.openai_base_url and self.openai_base_url.strip())
-        return has_key or has_proxy
+        return has_key or has_proxy or self.joey_uses_systemone
 
     @property
     def uses_openai_compatible_proxy(self) -> bool:
         """Route LLM traffic through Chat Completions (vLLM / Envoy), not Responses API."""
         return bool(self.openai_base_url and self.openai_base_url.strip())
+
+    @property
+    def joey_uses_systemone(self) -> bool:
+        """True when routing should use decision/score API like Baseten Playground."""
+        mode = (self.joey_routing_mode or "auto").strip().lower()
+        if mode == "vllm_json":
+            return False
+        if mode == "systemone":
+            return bool(self.joey_systemone_url and self.resolved_systemone_api_key)
+        # auto: prefer systemone when URL + key are set
+        return bool(self.joey_systemone_url and self.resolved_systemone_api_key)
+
+    @property
+    def resolved_systemone_api_key(self) -> str | None:
+        """API key for System One (JOEY_SYSTEMONE_API_KEY or BASETEN_API_KEY)."""
+        for value in (self.joey_systemone_api_key, self.baseten_api_key):
+            if value and value.strip():
+                return value.strip()
+        return None
 
     @property
     def effective_max_classification_retries(self) -> int:
