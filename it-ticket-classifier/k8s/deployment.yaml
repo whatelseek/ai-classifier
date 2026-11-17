@@ -72,6 +72,10 @@ spec:
               value: "180"
             - name: OPENAI_TIMEOUT_SECONDS
               value: "180"
+            - name: REQUEST_TIMEOUT_SECONDS
+              value: "300"
+            - name: MAX_CONCURRENT_REQUESTS
+              value: "20"
             - name: TEMP_DIR
               value: /data/tmp
           resources:
@@ -122,8 +126,10 @@ metadata:
   namespace: it-classifier
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "55m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-next-upstream-timeout: "300"
 spec:
   ingressClassName: nginx
   rules:
