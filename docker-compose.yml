@@ -5,10 +5,3 @@ services:
       - "8000:8000"
     env_file:
       - .env
-    environment:
-      TEMP_DIR: /tmp/it-ticket-classifier
-    volumes:
-      - classifier-tmp:/tmp/it-ticket-classifier
-
-volumes:
-  classifier-tmp:

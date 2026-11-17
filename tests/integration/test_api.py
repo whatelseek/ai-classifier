@@ -1,23 +1,41 @@
-"""Integration tests for FastAPI endpoints and multipart classification."""
+"""HTTP API: the same decision for every way of sending a description."""
 
 import asyncio
 import io
-import time
-import zipfile
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from app.api.dependencies import get_app_settings, get_request_semaphore
+from app.api.dependencies import get_app_settings, get_request_semaphore, get_service
 from app.core.config import Settings
+from app.llm.schemas import LLMClassificationOutput
 from app.main import create_app
-from app.models.requests import ClassifyRequestPayload
 from app.services.classifier import ClassificationService
+
+
+async def keyword_backend(settings, state, usage):
+    usage.llm_calls += 1
+    usage.token_usage["input"] += 12
+    usage.token_usage["output"] += 1
+    usage.token_usage["total"] += 13
+    text = state.lower()
+    if any(word in text for word in ("vpn", "ipsec", "check point")):
+        function = "network"
+    elif "postgres" in text:
+        function = "database"
+    else:
+        function = "needs_review"
+    return LLMClassificationOutput(function=function, confidence=0.9, reason="keyword")
 
 
 @pytest.fixture
 def app():
-    return create_app()
+    application = create_app()
+    application.dependency_overrides[get_service] = lambda: ClassificationService(
+        Settings(_env_file=None, JOEY_SYSTEMONE_URL="http://joey.test/v1/systemone"),
+        backend=keyword_backend,
+    )
+    return application
 
 
 @pytest.mark.asyncio
@@ -25,47 +43,36 @@ async def test_health_ready_functions(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         assert (await client.get("/health")).json()["status"] == "ok"
-        ready = await client.get("/ready")
-        assert ready.status_code == 200
+        ready = (await client.get("/ready")).json()
+        assert ready["status"] == "ready"
+        assert "joey_uses_systemone" in ready
+        assert ready["joey_decision_model"]
         funcs = await client.get("/api/v1/functions")
-        codes = {f["code"] for f in funcs.json()["functions"]}
+        codes = {item["code"] for item in funcs.json()["functions"]}
         assert codes == {"database", "security", "network", "it_infrastructure"}
 
 
 @pytest.mark.asyncio
-async def test_classify_text_network(app):
+async def test_classify_and_score_return_the_same_decision(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
+        classify = await client.post(
             "/api/v1/classify",
             data={"description": "IPsec VPN tunnel is not working with Check Point"},
         )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] in ("classified", "needs_review")
-        assert body["classification"]["function"] in ("network", "needs_review")
-        assert body["decision"] in ("network", "unclassified")
-
-
-@pytest.mark.asyncio
-async def test_score_endpoint_text_only(app):
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
+        score = await client.post(
             "/api/v1/score",
-            data={"description": "Configure IPsec VPN between Check Point and MikroTik"},
+            data={"description": "IPsec VPN tunnel is not working with Check Point"},
         )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] in ("classified", "needs_review")
-        assert body["decision"] in (
-            "database",
-            "security",
-            "network",
-            "it_infrastructure",
-            "unclassified",
-        )
-        assert body["processing"]["llm_calls"] in (0, 1)
+    assert classify.status_code == 200
+    body = classify.json()
+    assert body["status"] == "classified"
+    assert body["decision"] == "network"
+    assert body["classification"]["function"] == "network"
+    assert body["attachments"] == []
+    assert body["processing"]["llm_calls"] == 1
+    assert score.json()["decision"] == body["decision"]
+    assert score.json()["classification"]["confidence"] == body["classification"]["confidence"]
 
 
 @pytest.mark.asyncio
@@ -74,7 +81,10 @@ async def test_score_endpoint_text_only(app):
     [
         ({"json": {"description": "IPsec VPN tunnel is not working with Check Point"}}, "network"),
         ({"data": {"description": "PostgreSQL replication is broken"}}, "database"),
-        ({"content": "Please help with computer", "headers": {"content-type": "text/plain"}}, "unclassified"),
+        (
+            {"content": "Please help with computer", "headers": {"content-type": "text/plain"}},
+            "unclassified",
+        ),
     ],
 )
 async def test_decide_endpoint(app, kwargs, expected):
@@ -89,72 +99,68 @@ async def test_decide_endpoint(app, kwargs, expected):
 async def test_decide_requires_description(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/v1/decide", json={})
-    assert resp.status_code == 422
+        assert (await client.post("/api/v1/decide", json={})).status_code == 422
+        assert (await client.post("/api/v1/classify", data={})).status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_classify_validation_error(app):
+async def test_attachments_are_rejected(app):
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/v1/classify", data={})
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "failed"
-
-
-@pytest.mark.asyncio
-async def test_classify_log_attachment(app):
-    transport = ASGITransport(app=app)
-    log_data = b"FATAL: PostgreSQL could not extend file wal\n"
-    files = {"files": ("db.log", io.BytesIO(log_data), "text/plain")}
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/v1/classify", files=files)
-        body = resp.json()
-        assert body["attachments"][0]["status"] == "processed"
-        assert body["classification"]["function"] in ("database", "needs_review")
-
-
-@pytest.mark.asyncio
-async def test_classify_vsdx(app):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        zf.writestr(
-            "visio/pages/page1.xml",
-            """<?xml version="1.0" encoding="UTF-8"?>
-            <PageContents xmlns="http://schemas.microsoft.com/office/visio/2012/main">
-              <Shapes>
-                <Shape ID="1"><Text>Core Switch</Text></Shape>
-                <Connect FromSheet="1" ToSheet="2"/>
-              </Shapes>
-            </PageContents>""",
-        )
-    buf.seek(0)
-    transport = ASGITransport(app=app)
-    files = {"files": ("net.vsdx", buf, "application/vnd.ms-visio.drawing")}
+    files = {"files": ("note.txt", io.BytesIO(b"see ticket"), "text/plain")}
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post(
             "/api/v1/classify",
-            data={"description": "Review network diagram"},
+            data={"description": "деплой упал помогите"},
             files=files,
         )
-        body = resp.json()
-        assert body["attachments"][0]["status"] == "processed"
-        assert body["attachments"][0]["parser"] == "vsdx"
+    assert resp.status_code == 422
+    assert "Attachments" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_two_log_files_are_both_processed(app):
-    transport = ASGITransport(app=app)
-    files = [
-        ("files", ("a.log", io.BytesIO(b"vpn ipsec checkpoint\n"), "text/plain")),
-        ("files", ("b.log", io.BytesIO(b"postgresql replication wal\n"), "text/plain")),
-    ]
+async def test_decide_reports_a_model_failure():
+    async def boom(settings, state, usage):
+        raise RuntimeError("secret sk-live /tmp/openai-key")
+
+    application = create_app()
+    application.dependency_overrides[get_app_settings] = lambda: Settings(
+        _env_file=None,
+        JOEY_SYSTEMONE_URL="http://joey.test/v1/systemone",
+        request_timeout_seconds=5,
+    )
+    application.dependency_overrides[get_service] = lambda: ClassificationService(
+        Settings(_env_file=None, JOEY_SYSTEMONE_URL="http://joey.test/v1/systemone"),
+        backend=boom,
+    )
+    transport = ASGITransport(app=application)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/v1/classify", files=files)
-        body = resp.json()
-        names = {item["filename"]: item["status"] for item in body["attachments"]}
-        assert names == {"a.log": "processed", "b.log": "processed"}
-        assert body["request_id"]
+        decide = await client.post("/api/v1/decide", json={"description": "VPN down"})
+        classify = await client.post("/api/v1/classify", data={"description": "VPN down"})
+    assert decide.status_code == 502
+    assert "sk-live" not in decide.text
+    assert "secret" not in decide.text
+    assert "openai-key" not in decide.text
+    body = classify.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["code"] == "classification_error"
+    assert "sk-live" not in body["errors"][0]["message"]
+
+
+@pytest.mark.asyncio
+async def test_queue_wait_counts_toward_request_timeout(app):
+    app.dependency_overrides[get_app_settings] = lambda: Settings(
+        _env_file=None,
+        request_timeout_seconds=1,
+        JOEY_SYSTEMONE_URL="http://joey.test/v1/systemone",
+    )
+    app.dependency_overrides[get_request_semaphore] = lambda: asyncio.Semaphore(0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/v1/classify", data={"description": "IPsec VPN tunnel"})
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert body["errors"][0]["code"] == "timeout"
+    assert "Traceback" not in body["errors"][0]["message"]
 
 
 @pytest.mark.asyncio
@@ -162,85 +168,19 @@ async def test_concurrent_requests_keep_separate_results(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         network, database = await asyncio.gather(
-            client.post(
-                "/api/v1/classify",
-                data={"description": "IPsec VPN tunnel is not working with Check Point"},
-            ),
-            client.post(
-                "/api/v1/classify",
-                data={"description": "PostgreSQL replication is broken"},
-            ),
+            client.post("/api/v1/classify", data={"description": "IPsec VPN tunnel is not working"}),
+            client.post("/api/v1/classify", data={"description": "PostgreSQL replication is broken"}),
         )
-    assert network.json()["classification"]["function"] == "network"
-    assert database.json()["classification"]["function"] == "database"
+    assert network.json()["decision"] == "network"
+    assert database.json()["decision"] == "database"
     assert network.json()["request_id"] != database.json()["request_id"]
 
 
 @pytest.mark.asyncio
-async def test_queue_wait_counts_toward_request_timeout(app):
-    app.dependency_overrides[get_app_settings] = lambda: Settings(
-        request_timeout_seconds=1,
-        openai_api_key="",
-    )
-    app.dependency_overrides[get_request_semaphore] = lambda: asyncio.Semaphore(0)
+async def test_openapi_has_no_scoring_only_parameter(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post(
-            "/api/v1/classify",
-            data={"description": "IPsec VPN tunnel is not working"},
-        )
-    body = resp.json()
-    assert body["status"] == "failed"
-    assert body["errors"][0]["code"] == "timeout"
-    assert "Traceback" not in body["errors"][0]["message"]
-    app.dependency_overrides.clear()
-
-
-@pytest.mark.asyncio
-async def test_internal_error_hides_exception_text():
-    service = ClassificationService(Settings(openai_api_key="", request_timeout_seconds=30))
-
-    class Boom:
-        async def ainvoke(self, *_args, **_kwargs):
-            raise RuntimeError("secret /tmp/openai-key sk-live")
-
-    service._graph = Boom()
-    response = await service.classify(
-        ClassifyRequestPayload(
-            description="VPN down",
-            issue_key=None,
-            client=None,
-            attachments=[],
-        ),
-        started_at=time.perf_counter(),
-    )
-    assert response.status.value == "failed"
-    message = response.errors[0]["message"]
-    assert response.errors[0]["code"] == "internal_error"
-    assert "secret" not in message
-    assert "sk-live" not in message
-
-
-@pytest.mark.asyncio
-async def test_elapsed_budget_returns_timeout_before_the_graph():
-    service = ClassificationService(Settings(openai_api_key="", request_timeout_seconds=5))
-    response = await service.classify(
-        ClassifyRequestPayload(
-            description="VPN down",
-            issue_key=None,
-            client=None,
-            attachments=[],
-        ),
-        started_at=time.perf_counter() - 30,
-    )
-    assert response.errors[0]["code"] == "timeout"
-    assert response.errors[0]["message"] == "Request processing timed out"
-
-
-@pytest.mark.asyncio
-async def test_unsupported_extension_reported(app):
-    transport = ASGITransport(app=app)
-    files = {"files": ("bad.bin", io.BytesIO(b"\x00\x01"), "application/octet-stream")}
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        resp = await client.post("/api/v1/classify", files=files)
-        assert resp.json()["status"] == "failed"
+        schema = (await client.get("/openapi.json")).json()
+    for path in ("/api/v1/classify", "/api/v1/score"):
+        params = schema["paths"][path]["post"].get("parameters") or []
+        assert "scoring_only" not in {item["name"] for item in params}

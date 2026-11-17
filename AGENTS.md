@@ -26,8 +26,8 @@ Return the API JSON to the user (or `function` + `confidence` only).
 
 ## Labels
 
-Decisions: **`database`**, **`security`**, **`network`**, **`it_infrastructure`** (IT-infrastructure) or **`unclassified`**. Classification uses **description text only** (`CLASSIFY_DESCRIPTION_ONLY=true`); attachments are parsed but not sent to the scorer.
+Decisions: **`database`**, **`security`**, **`network`**, **`it_infrastructure`** (IT-infrastructure) or **`unclassified`**. Send the description only. Attachments are rejected, and secrets (and private IPs, unless `MASK_INTERNAL_HOSTS=false`) are masked before the text is sent. `confidence` is Joey's probability for the winning option; nothing rewrites a low score into `unclassified`.
 
 ## Joey = System One
 
-Joey (`baselabs/joey-1`) is a decision model. It only works through the **System One** API (`state` + `choice` question), served on Spark by `services/joey-qev-server` (port 8003). Do not serve or call it through vLLM / OpenAI chat completions: that returns noise. Check `GET /ready`: `joey_uses_systemone` must be `true`. Deploy and the reason: `docs/joey.md`.
+Joey (`baselabs/joey-1`) is a decision model. It only works through the **System One** API (`state` + `choice` question), served on Spark by `services/joey-qev-server` (port 8003). The classifier calls `JOEY_SYSTEMONE_URL` and nothing else. Do not serve or call Joey through vLLM / OpenAI chat completions: that returns noise. Check `GET /ready`: `joey_uses_systemone` must be `true`. Deploy and the reason: `docs/joey.md`. A Joey failure on `POST /api/v1/decide` is an HTTP error, not `{"decision":"unclassified"}`.

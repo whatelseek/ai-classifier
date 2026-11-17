@@ -4,7 +4,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export KUBECONFIG="${KUBECONFIG:-$HOME/.keys/kube/kube-infra.conf}"
 IMAGE="${CLASSIFIER_IMAGE:-ttl.sh/vexa-it-ticket-classifier:24h}"
 
-echo "==> Build slim API image (Docling runs on Spark)"
+echo "==> Build API image"
 docker build -t it-ticket-classifier:local "$ROOT"
 docker tag it-ticket-classifier:local "$IMAGE"
 docker push "$IMAGE"

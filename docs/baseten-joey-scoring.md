@@ -7,7 +7,6 @@ Joey answers through the **System One** API only: a `state` plus typed `question
 Self-hosted on Spark (what `k8s/deployment.yaml` uses; deploy and why vLLM cannot serve it: [joey.md](joey.md)):
 
 ```bash
-JOEY_ROUTING_MODE=systemone
 JOEY_SYSTEMONE_URL=http://10.70.0.121:8003/v1/systemone
 JOEY_DECISION_MODEL=joey-1
 ```
@@ -15,7 +14,6 @@ JOEY_DECISION_MODEL=joey-1
 Baseten instead:
 
 ```bash
-JOEY_ROUTING_MODE=systemone
 JOEY_SYSTEMONE_URL=https://inference.baseten.co/v1/systemone
 BASETEN_API_KEY=<your key>          # or JOEY_SYSTEMONE_API_KEY
 JOEY_DECISION_MODEL=decision-models/baseten-joey-2b-latest
@@ -25,7 +23,7 @@ JOEY_DECISION_MODEL=decision-models/baseten-joey-2b-latest
 
 ## What the classifier sends
 
-- `state`: the ticket description after `extract_request_body` (no attachments, headers or signatures).
+- `state`: the ticket description after `extract_request_body` (no headers, signatures, or inline attachment blocks), then with secrets and private IP addresses masked.
 - `questions.route`: one `choice` question, instructions `Какая команда поддержки должна обработать это обращение?`.
 - `criteria`: `database`, `security`, `network`, `it_infrastructure` and `unclassified`, each with a one-sentence description of what the team handles. The question is `JOEY_ROUTE_INSTRUCTIONS` and the descriptions are `JOEY_CRITERIA_DATABASE`, `JOEY_CRITERIA_SECURITY`, `JOEY_CRITERIA_NETWORK`, `JOEY_CRITERIA_IT_INFRASTRUCTURE`, and `JOEY_CRITERIA_UNCLASSIFIED` (`k8s/deployment.yaml`, or `.env` locally).
 

@@ -1,4 +1,4 @@
-"""Pydantic schemas for LLM structured classification output."""
+"""Pydantic schema for one routing decision."""
 
 from typing import Literal
 
@@ -18,15 +18,7 @@ class LLMAlternative(BaseModel):
 
 
 class LLMClassificationOutput(BaseModel):
-    """Structured output schema validated after each LLM call.
-
-    Attributes:
-        function: Primary function or ``needs_review``.
-        confidence: Model-reported confidence in ``[0, 1]``.
-        reason: Short natural-language justification.
-        alternatives: Other plausible functions with scores.
-        evidence: Phrases supporting the decision.
-    """
+    """One decision. ``unclassified`` from Joey is stored as ``needs_review``."""
 
     function: Literal["database", "security", "network", "it_infrastructure", "needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
@@ -36,71 +28,19 @@ class LLMClassificationOutput(BaseModel):
 
     @field_validator("function", mode="before")
     @classmethod
-    def validate_function(cls, v: str) -> str:
-        """Reject function codes outside the configured enumeration.
-
-        Args:
-            v: Raw function string from the model.
-
-        Returns:
-            Validated function code.
-
-        Raises:
-            ValueError: When the function is not allowed.
-        """
-        raw = str(v).strip().lower()
+    def validate_function(cls, value: str) -> str:
+        """Map legacy labels and reject anything outside the enumeration."""
+        raw = str(value).strip().lower()
         normalized = normalize_routing_function(raw)
         if normalized == "needs_review" and raw not in ("needs_review", "unclassified"):
-            raise ValueError(f"Invalid function: {v}")
+            raise ValueError(f"Invalid function: {value}")
         return normalized
 
     @field_validator("alternatives")
     @classmethod
-    def validate_alternatives(cls, v: list[LLMAlternative]) -> list[LLMAlternative]:
-        """Ensure alternative functions are members of the support enum.
-
-        Args:
-            v: Parsed alternative list.
-
-        Returns:
-            The same list when valid.
-
-        Raises:
-            ValueError: When any alternative uses an unknown function.
-        """
-        for alt in v:
+    def validate_alternatives(cls, value: list[LLMAlternative]) -> list[LLMAlternative]:
+        """Keep only the four support teams as alternatives."""
+        for alt in value:
             if alt.function not in SUPPORTED_FUNCTIONS:
                 raise ValueError(f"Invalid alternative function: {alt.function}")
-        return v
-
-
-def _strict_classification_schema() -> dict:
-    """Build an OpenAI strict-mode JSON schema for classification output.
-
-    Returns:
-        Schema with ``additionalProperties`` false and every property required.
-    """
-    from openai.lib._pydantic import to_strict_json_schema
-
-    schema = to_strict_json_schema(LLMClassificationOutput)
-    if not isinstance(schema, dict):
-        raise TypeError("Strict classification schema must be a JSON object")
-    return schema
-
-
-CLASSIFICATION_JSON_SCHEMA = _strict_classification_schema()
-
-# Smaller schema for Joey/vLLM (fewer fields → less guided-decoding padding).
-JOEY_CLASSIFICATION_JSON_SCHEMA: dict = {
-    "type": "object",
-    "properties": {
-        "function": {
-            "type": "string",
-            "enum": ["database", "security", "network", "it_infrastructure", "unclassified"],
-        },
-        "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
-        "reason": {"type": "string", "maxLength": 240},
-    },
-    "required": ["function", "confidence", "reason"],
-    "additionalProperties": False,
-}
+        return value
