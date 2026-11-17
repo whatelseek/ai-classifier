@@ -90,6 +90,9 @@ class OpenAIClassificationClient:
             }
             if settings.openai_base_url:
                 kwargs["base_url"] = settings.openai_base_url.rstrip("/")
+            # Envoy AI Gateway picks the Spark backend via x-ai-eg-model (Joey/Qwen routes).
+            if settings.openai_base_url and settings.openai_text_model:
+                kwargs["default_headers"] = {"x-ai-eg-model": settings.openai_text_model}
             self._client = AsyncOpenAI(**kwargs)
 
     @property
