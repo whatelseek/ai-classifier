@@ -24,6 +24,7 @@ Examples:
 - "Configure IPsec VPN between Check Point and MikroTik" -> network
 - "PostgreSQL replication is broken" -> database
 - "Linux systemd service fails to start" -> linux
+- "mdadm RAID degraded, /proc/mdstat shows [U_]" -> linux
 - "Investigate suspicious activity detected by SIEM" -> security
 """
 

@@ -73,7 +73,7 @@ spec:
             - name: OPENAI_TIMEOUT_SECONDS
               value: "180"
             - name: OPENAI_MAX_OUTPUT_TOKENS
-              value: "512"
+              value: "128"
             - name: MAX_CONCURRENT_REQUESTS
               value: "20"
             - name: REQUEST_TIMEOUT_SECONDS

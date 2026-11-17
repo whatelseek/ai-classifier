@@ -235,8 +235,36 @@ class OpenAIClassificationClient:
         return _extract_output_text(response) or ""
 
 
+def _normalize_vllm_structured_json(raw: str) -> str:
+    """Repair Joey/vLLM structured outputs that pad with tabs after ``confidence``."""
+    text = raw.strip()
+    head = re.match(
+        r'\{\s*"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"'
+        r'\s*,\s*"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)?',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not head:
+        return re.sub(r"[\t ]{20,}", "", text)
+    func = head.group("func").lower()
+    conf = float(head.group("c")) if head.group("c") else 0.72
+    remainder = text[head.end() :]
+    if remainder and not remainder.lstrip().startswith(('"', "}", ",")):
+        return json.dumps(
+            {
+                "function": func,
+                "confidence": conf,
+                "reason": "Structured model head (vLLM output padding removed)",
+                "alternatives": [],
+                "evidence": [],
+            }
+        )
+    return text
+
+
 def _parse_classification_json(raw: str) -> LLMClassificationOutput:
     """Parse model JSON, tolerating trailing junk from smaller local models."""
+    raw = _normalize_vllm_structured_json(raw)
     try:
         return LLMClassificationOutput.model_validate_json(raw)
     except ValueError:
@@ -271,7 +299,7 @@ def _salvage_classification_json(raw: str) -> LLMClassificationOutput | None:
     conf_match = re.search(r'"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)', raw)
     if conf_match:
         confidence = float(conf_match.group("c"))
-    reason = "Recovered from partial model JSON (truncated structured output)"
+    reason = "Recovered from partial model JSON (truncated or padded structured output)"
     reason_match = re.search(r'"reason"\s*:\s*"(?P<r>(?:\\.|[^"\\])*)"', raw, re.DOTALL)
     if reason_match:
         reason = reason_match.group("r").replace('\\"', '"')[:2000]
