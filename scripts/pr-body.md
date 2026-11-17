@@ -16,11 +16,10 @@ Production deployment support for the IT ticket classifier on Kubernetes, with *
 - Docling removed from default wheel deps (`pip install .[docling]` for local in-process use)
 
 ### Kubernetes
-- `it-ticket-classifier/k8s/deployment.yaml` — namespace `it-classifier`, **30Gi PVC**, ingress `it-classifier.apps.vexa.home`
+- `k8s/deployment.yaml` — namespace `it-classifier`, ingress `it-classifier.apps.vexa.home`
 - `scripts/deploy-k8s.sh`
 
 ## Ops notes (outside repo)
 
-- Spark: Joey vLLM on `10.70.0.121:8001` (`Joey-1-Local`)
+- Spark: Joey qev server on `10.70.0.121:8003` (`services/joey-qev-server/deploy.sh`, see `docs/joey.md`)
 - Spark: Docling on `10.70.0.121:8002`
-- Envoy: `joey-gateway.yaml` in `k8s-apps` (platform repo / ops)

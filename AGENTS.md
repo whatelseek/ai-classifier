@@ -23,3 +23,11 @@ curl -sS -H 'Host: it-classifier.apps.vexa.home' \
 ```
 
 Return the API JSON to the user (or `function` + `confidence` only).
+
+## Labels
+
+Decisions: **`database`**, **`security`**, **`network`**, **`it_infrastructure`** (IT-infrastructure) or **`unclassified`**. Classification uses **description text only** (`CLASSIFY_DESCRIPTION_ONLY=true`); attachments are parsed but not sent to the scorer.
+
+## Joey = System One
+
+Joey (`baselabs/joey-1`) is a decision model. It only works through the **System One** API (`state` + `choice` question), served on Spark by `services/joey-qev-server` (port 8003). Do not serve or call it through vLLM / OpenAI chat completions: that returns noise. Check `GET /ready`: `joey_uses_systemone` must be `true`. Deploy and the reason: `docs/joey.md`.

@@ -1,8 +1,0 @@
-[
-  {"id": "n1", "description": "Configure IPsec VPN between Check Point and MikroTik", "expected": "network"},
-  {"id": "d1", "description": "PostgreSQL replication is broken on prod", "expected": "database"},
-  {"id": "l1", "description": "systemd unit nginx.service fails to start on Ubuntu", "expected": "linux"},
-  {"id": "s1", "description": "Investigate suspicious activity detected by SIEM", "expected": "security"},
-  {"id": "a1", "description": "Please help with computer", "expected": "needs_review"},
-  {"id": "m1", "description": "BGP session down and PostgreSQL slow queries", "expected": "needs_review"}
-]
