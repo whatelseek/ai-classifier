@@ -29,8 +29,6 @@ async def extract(file: UploadFile = File(...)) -> ExtractResponse:
     if not data:
         raise HTTPException(status_code=400, detail="empty file")
 
-    from docling.document_converter import DocumentConverter
-
     ext = Path(file.filename).suffix or ".bin"
     text = await _convert(data, ext)
     if not text.strip():
@@ -45,6 +43,8 @@ async def _convert(data: bytes, suffix: str) -> str:
 
 
 def _convert_sync(data: bytes, suffix: str) -> str:
+    from docling.document_converter import DocumentConverter
+
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
         tmp.write(data)
         tmp.flush()
