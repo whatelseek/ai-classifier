@@ -20,15 +20,43 @@ _META_LINE_PREFIXES = (
 )
 
 
-def extract_request_body(description: str) -> str:
+_NOISE_LINE = re.compile(
+    r"^(От|Кому|Копия|From|To|Cc):\s|"
+    r"^(Добрый день|Здравствуйте|Доброе утро|Добрый вечер)[!,.]?\s*$|"
+    r"^Запись звонка на линию поддержки\.|"
+    r"^Тема:\s*(RE:\s*|FW:\s*)*Проблема\s*$",
+    re.IGNORECASE,
+)
+
+
+def extract_request_body(description: str, *, include_attachments: bool = True) -> str:
     """Return the incident narrative without L1 triage instructions or form headers.
 
     Args:
         description: Raw ticket text from the API or training user turn.
+        include_attachments: When false, inline ``Вложения:`` / ``<file>`` blocks,
+            mail headers, greetings and signatures are dropped as well.
 
     Returns:
         Shortened body suitable for routing classification.
     """
+    body = _extract(description)
+    if include_attachments:
+        return body
+    return _description_only(body)
+
+
+def _description_only(text: str) -> str:
+    text = re.split(r"^\s*Вложения:\s*$", text, maxsplit=1, flags=re.MULTILINE)[0]
+    text = re.sub(r"<file\b[^>]*>.*?(</file>|\Z)", "", text, flags=re.DOTALL)
+    text = re.split(r"^\s*--\s*$", text, maxsplit=1, flags=re.MULTILINE)[0]
+    kept = [line for line in text.splitlines() if not _NOISE_LINE.search(line.strip())]
+    text = "\n".join(kept)
+    text = re.sub(r"^\s*Со слов пользователя:\s*", "", text, flags=re.MULTILINE)
+    return _cap(text)
+
+
+def _extract(description: str) -> str:
     text = (description or "").strip()
     if not text:
         return text

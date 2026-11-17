@@ -141,11 +141,10 @@ class OpenAIClassificationClient:
             RuntimeError: When no API key is configured.
             TypeError: When the model returns an empty parsed payload.
         """
+        description_only = self._settings.classify_description_only
         body = description
         if self._settings.classify_extract_request_body:
-            body = extract_request_body(description)
-
-        description_only = self._settings.classify_description_only
+            body = extract_request_body(description, include_attachments=not description_only)
         if description_only:
             merged_context = ""
 
