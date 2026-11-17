@@ -23,9 +23,10 @@ metadata:
   name: it-ticket-classifier
   namespace: it-classifier
 type: Opaque
+# BASETEN_API_KEY: add via `kubectl -n it-classifier create secret generic it-ticket-classifier \
+#   --from-literal=OPENAI_API_KEY=dummy --from-literal=BASETEN_API_KEY=<key> --dry-run=client -o yaml | kubectl apply -f -`
 stringData:
   OPENAI_API_KEY: "dummy"
-  BASETEN_API_KEY: ""
 ---
 apiVersion: apps/v1
 kind: Deployment
