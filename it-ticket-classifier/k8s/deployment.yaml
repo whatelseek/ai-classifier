@@ -74,6 +74,8 @@ spec:
               value: "180"
             - name: OPENAI_MAX_OUTPUT_TOKENS
               value: "128"
+            - name: CLASSIFY_EXTRACT_REQUEST_BODY
+              value: "true"
             - name: MAX_CONCURRENT_REQUESTS
               value: "4"
             - name: REQUEST_TIMEOUT_SECONDS
