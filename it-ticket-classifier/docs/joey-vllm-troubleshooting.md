@@ -1,38 +1,54 @@
-# Joey (vLLM) troubleshooting for classification
-
-Joey (`baselabs/joey-1` on Spark, `:8001`) is only reliable when vLLM has enough GPU memory and is not competing with Qwen on the same device.
-
-## Symptoms
-
-- Free-text output repeats garbage tokens (e.g. `ówczas…`).
-- `json_schema` completions pad with tabs after `"confidence"` or return nonsense (`"confidence": -9`).
-- Salvage extracts `database` or `needs_review` for unrelated tickets.
-- Near-zero accuracy on L1 ticket eval sets despite healthy `/v1/models`.
+# Joey on Spark: why vLLM returns garbage, and how it is served instead
 
 ## Root cause
 
-Not established. An earlier theory was GPU contention: on `spark1`, **Qwen** (`:8000`, `--gpu-memory-utilization 0.8`) and **Joey** (`:8001`, `0.1`) share one GPU.
+`baselabs/joey-1` is a **decision model**, not a text generator. Its model card and `config.json` say so:
 
-That theory does not explain the state seen on 2026-11-17: Joey's `/metrics` reported `gpu_memory_utilization="0.55"`, Qwen was not listening on `:8000`, and Joey still produced garbage. Evidence from that day, all from Joey's HTTP API:
+- `modeling_overrides.attention.full_attention = "block_bidirectional"`: the full-attention layers were trained with a mask that is bidirectional inside the prompt prefix and inside the question suffix.
+- `readout = "slot_lm"`: the answer is read from the logits of the option letters at one position. No token is ever sampled.
+- The repository ships `setup.sh` and `serve.patch`, which install the only supported runtime: OneJev `qev` at commit `81ce62f` plus the patch.
 
-- A raw `/v1/completions` call with `"The capital of France is"` returns `ówczasówczas…`, so the chat template and `json_schema` are not involved.
-- With `logprobs: 5`, the top five next tokens all sit near `-10.6`, a near-uniform distribution over the vocabulary. The model behaves as if its weights were not loaded.
-- `vllm:request_success_total` showed 2223 requests finished by `length` and 1 by `stop` since process start: no generation ended naturally.
+vLLM resolves the checkpoint as `Qwen3_5ForConditionalGeneration`, ignores `modeling_overrides`, runs it with a causal mask and samples from the LM head. The weights load without warnings, so nothing in the vLLM log points at the problem. The output is noise.
 
-The same model answers correctly on OpenRouter, so look at how this server loads it: the vLLM startup log (weight-loading warnings), the vLLM build (`0.1.dev21818`), and the launch flags against the model card.
+GPU contention with Qwen, `--gpu-memory-utilization`, prompts and `json_schema` have nothing to do with it. No vLLM flag fixes this.
 
-## Things to try (none confirmed to fix it)
+## Symptoms under vLLM
 
-1. **Prefer Qwen for routing** (recommended today): point the classifier at Spark Qwen with the real served model id, `OPENAI_MAX_OUTPUT_TOKENS=256`, low concurrency.
-2. **Joey solo**: stop the Qwen container, restart Joey with `gpu_memory_utilization` ≥ **0.25** (see `k8s-apps/ai-platform/spark-vllm/recipes/baselabs-joey-1-solo.yaml`).
-3. **Envoy**: use `OPENAI_BASE_URL` to Envoy and set `x-ai-eg-model` (see `OpenAIClassificationClient`) plus matching `--served-model-name` on vLLM.
-4. **Do not** expect prompt or schema tweaks alone to fix starved Joey; validate with a plain completion (`max_tokens: 16`) before running batch evals.
+- Any completion repeats tokens such as `ówczasówczas…`, including a raw `/v1/completions` call.
+- With `logprobs`, the top next tokens all sit near `-10.6` (close to uniform over the vocabulary).
+- `vllm:request_success_total` shows almost every request finished by `length`.
+- `/v1/models` and `/health` look healthy.
 
-## Quick smoke test
+## How Joey is served
+
+`services/joey-qev-server` runs the checkpoint with the `qev` `DecisionEngine` and exposes the System One API on spark1 port **8003**:
 
 ```bash
-curl -s "http://SPARK:8001/v1/chat/completions" -H 'Content-Type: application/json' \
-  -d '{"model":"Joey-1-Local","messages":[{"role":"user","content":"Say: ok"}],"max_tokens":8,"temperature":0}'
+services/joey-qev-server/deploy.sh
 ```
 
-If the content is not a short sensible string, Joey is unhealthy—restart solo or switch models.
+The script builds an image on Spark from `vllm-node-b12x` (used only for its GB10 build of torch and transformers 5.19.0, the version the model pins), clones OneJev at the pinned commit, applies the `serve.patch` from the model snapshot in the HF cache, and starts container `joey-qev` with `--restart unless-stopped`. It uses about 7 GB of GPU memory and answers a ticket in about 0.1 s.
+
+Two details that silently break it:
+
+- `DecisionEngine` reads `readout.json` and `modeling_overrides` only when given a **local directory**. Given the Hub id `baselabs/joey-1` it falls back to causal attention. `serve.py` resolves the snapshot path and refuses to start unless the engine reports `attention=noncausal`.
+- `qev serve` picks the multimodal engine for this checkpoint (it has a `vision_config`), and `serve.patch` does not patch that engine. `serve.py` builds the text `DecisionEngine` directly, as the model card does.
+
+The classifier reaches it through `JOEY_SYSTEMONE_URL=http://10.70.0.121:8003/v1/systemone` (see `k8s/deployment.yaml`). No API key is needed.
+
+## Smoke test
+
+```bash
+curl -s http://10.70.0.121:8003/health
+curl -s http://10.70.0.121:8003/v1/systemone -H 'Content-Type: application/json' -d '{
+  "model": "joey-1",
+  "state": "Не работает VPN туннель до филиала",
+  "questions": {"team": {"type": "choice", "criteria": {"network": "VPN, firewall", "database": "PostgreSQL"}}}
+}'
+```
+
+A healthy answer has `answers.team.choice = "network"` with a probability well above 0.5. `docker logs joey-qev` must contain `attention=noncausal`.
+
+## The old vLLM endpoint
+
+The vLLM container `vllm_joey` (spark1 `:8001`, model id `Joey-1-Local`, also the Envoy route) cannot serve this model. The classifier's routing no longer calls it. `OPENAI_TEXT_MODEL=Joey-1-Local` stays in the deployment because a model name containing `joey` is what selects the System One code path.

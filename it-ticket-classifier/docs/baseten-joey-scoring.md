@@ -1,90 +1,61 @@
-# Baseten Joey — scoring-only (IT ticket routing)
+# Joey routing through System One
 
-Use this when you need the same **four-way score** as `POST /api/v1/classify`, without actions or custom downstream code.
+Joey answers through the **System One** API only: a `state` plus typed `questions` in, a probability per option out. The same request works against the self-hosted server on Spark and against Baseten.
 
-## Production (`it-classifier` = Playground)
+## Endpoints
 
-Spark **vLLM chat + `json_schema`** is not the same runtime as Baseten **System One / score**.
-To match Playground, set:
+Self-hosted on Spark (what `k8s/deployment.yaml` uses; see `joey-vllm-troubleshooting.md` for how it is served):
 
 ```bash
-JOEY_ROUTING_MODE=auto          # or systemone
+JOEY_ROUTING_MODE=systemone
+JOEY_SYSTEMONE_URL=http://10.70.0.121:8003/v1/systemone
+JOEY_DECISION_MODEL=joey-1
+```
+
+Baseten instead:
+
+```bash
+JOEY_ROUTING_MODE=systemone
 JOEY_SYSTEMONE_URL=https://inference.baseten.co/v1/systemone
-BASETEN_API_KEY=<your key>
+BASETEN_API_KEY=<your key>          # or JOEY_SYSTEMONE_API_KEY
 JOEY_DECISION_MODEL=decision-models/baseten-joey-2b-latest
 ```
 
-The classifier sends:
+`GET /ready` reports `joey_uses_systemone: true` when a URL is set. The API key is optional and is sent as a bearer token only when present.
 
-- `state` — ticket body (+ attachment text), same as Playground **STATE**
-- `questions.route` — `type: score`, instructions `К какой категории относится обращение?`
-- `criteria` — `database`, `security`, `network`, `it_infrastructure`; description text only. Low confidence → `unclassified`.
+## What the classifier sends
 
-Winner = level with highest `probabilities`. Without `BASETEN_API_KEY`, `auto` falls back to Spark vLLM JSON (legacy).
+- `state`: the ticket description after `extract_request_body` (no attachments, headers or signatures).
+- `questions.route`: one `choice` question, instructions `Какая команда поддержки должна обработать это обращение?`.
+- `criteria`: `database`, `security`, `network`, `it_infrastructure` and `unclassified`, each with a one-sentence description of what the team handles. The text lives in `ROUTE_CRITERIA` in `app/llm/joey_systemone.py`.
 
-## Playground setup
+The decision is the option with the highest probability, and `confidence` is that probability. `unclassified` is a real option the model can pick, not a confidence threshold.
 
-1. Open **Baseten → Joey 1 → Playground**.
-2. Select the **Support routing** tab (not **Lead qualification** — that tab shows the “nurture sequence” placeholder).
-3. **Input mode:** Form.
-4. **Question (fixed):**
+## Why `choice` with descriptions
 
-   ```text
-   К какой категории относится обращение?
-   ```
+Measured on the 176 labeled descriptions (`train_messages_labeled.jsonl`), same server, same sanitized state:
 
-5. **Levels (lowest index = lowest score bar order; use four labels aligned with prod):**
+| Question | Accuracy |
+|---|---:|
+| `score`, four team names as levels (the earlier Playground-style question) | 52.8% |
+| `choice`, team names only | 61.9% |
+| `choice`, team descriptions | 81.8% |
+| `choice`, team descriptions + `unclassified` (in use) | 80.1% |
 
-   | Index | Label      | Maps to API `function` |
-   |------:|------------|-------------------------|
-   | 0     | `network`  | `network`               |
-   | 1     | `linux`    | `linux`                   |
-   | 2     | `security` | `security`                |
-   | 3     | `database` | `database`                |
+`score` is meant for ordered levels; team names are not ordered. A probability threshold on the four-way answer does not catch off-topic text (for example a request for an income certificate scored `database` at 0.74), while the explicit `unclassified` option caught all ten off-topic probes tried.
 
-   Do **not** use `dbs` — that only matches half of prod and skews comparisons.
+The descriptions were written from the service catalog of the same dataset, so these numbers are not a held-out estimate. To change routing policy, edit the descriptions and re-run the evaluation.
 
-6. **State:** paste the ticket **body only** (same as the classifier after `extract_request_body`):
-   - Text after `Описание:` plus `Вложения:` blocks (`<file name="...">…</file>`).
-   - Omit L1 wrapper lines (`Классифицируй…`, номер, заявитель, телефон, сервис).
-   - Keep under the form size limit; if the UI shows `truncation` at the top, shorten metadata, not CVE rows.
+## Comparing with the Baseten Playground
 
-7. **Threshold:** leave default or set ~0.5 — routing in prod uses model JSON + confidence gating, not this slider.
-8. **Your code would:** leave empty or disabled for scoring-only tests. Any text there (e.g. “Add to the nurture sequence”) is **not** model output.
+The Playground's **Support routing** tab asks a `score` question over levels, so its distribution is not directly comparable with production any more. To compare like with like, send the production request body (above) to Baseten's `/v1/systemone` endpoint.
 
-## Example State (TCK-211291)
-
-```text
-отчет сканера что делать
-
-<file name="scan_report.csv">
-host;port;cve;cvss;title
-10.50.1.11;443;CVE-2024-6387;8.1;OpenSSH regreSSHion RCE
-10.50.1.11;22;CVE-2023-48795;5.9;SSH Terrapin prefix truncation
-10.50.1.14;8080;CVE-2024-23897;9.8;Jenkins arbitrary file read
-10.50.1.20;443;-;0.0;TLS certificate expires in 25 days
-</file>
-```
-
-Expected top label: **`security`** (high share in Distribution).
-
-## Production parity (`it-classifier`)
-
-| Baseten Distribution winner | API field `classification.function` |
-|----------------------------|-------------------------------------|
-| `network`                  | `network`                           |
-| `linux`                    | `linux`                             |
-| `security`                 | `security`                          |
-| `database`                 | `database`                          |
-
-Classifier env (K8s): `OPENAI_TEXT_MODEL=Joey-1-Local`, `OPENAI_MAX_OUTPUT_TOKENS=128`, Joey body hints for CVE/scanner patterns when the model returns `database` from padding salvage.
-
-Smoke test against prod:
+## Smoke test against prod
 
 ```bash
-curl -sS -H 'Host: it-classifier.apps.vexa.home' \
-  --data-urlencode 'description=…' \
-  http://10.80.10.29:32381/api/v1/classify
+curl -sS -H 'Host: it-classifier.apps.vexa.home' -H 'Content-Type: application/json' \
+  -d '{"description": "много failed password в логах"}' \
+  http://10.80.10.29:32381/api/v1/decide
 ```
 
-Read `classification.function` and `classification.confidence` only — no `suggested_actions` field.
+Expected: `{"decision":"security","confidence":…}`.
