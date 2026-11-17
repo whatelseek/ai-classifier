@@ -154,7 +154,7 @@ class OpenAIClassificationClient:
                         "schema": CLASSIFICATION_JSON_SCHEMA,
                     },
                 },
-                max_tokens=2048,
+                max_tokens=self._settings.openai_max_output_tokens,
                 temperature=0.0,
             )
             usage.record(response.usage)
@@ -235,8 +235,39 @@ class OpenAIClassificationClient:
         return _extract_output_text(response) or ""
 
 
+def _normalize_vllm_structured_json(raw: str) -> str:
+    """Repair Joey/vLLM structured outputs that pad with tabs after ``confidence``."""
+    text = raw.strip()
+    func_match = re.search(
+        r'"function"\s*:\s*"(?P<func>network|linux|security|database|needs_review)"',
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not func_match:
+        return re.sub(r"[\t ]{20,}", "", text)
+    func = func_match.group("func").lower()
+    conf_match = re.search(r'"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)', text)
+    has_padding = re.search(r'"confidence"\s*:\s*[\t ]{2,}', text) is not None
+    try_to_repair = has_padding or (
+        conf_match is None and re.search(r'"confidence"\s*:', text) is not None
+    )
+    if try_to_repair:
+        confidence = float(conf_match.group("c")) if conf_match else 0.72
+        return json.dumps(
+            {
+                "function": func,
+                "confidence": confidence,
+                "reason": "Structured model head (vLLM output padding removed)",
+                "alternatives": [],
+                "evidence": [],
+            }
+        )
+    return re.sub(r"[\t ]{20,}", "", text)
+
+
 def _parse_classification_json(raw: str) -> LLMClassificationOutput:
     """Parse model JSON, tolerating trailing junk from smaller local models."""
+    raw = _normalize_vllm_structured_json(raw)
     try:
         return LLMClassificationOutput.model_validate_json(raw)
     except ValueError:
@@ -271,7 +302,7 @@ def _salvage_classification_json(raw: str) -> LLMClassificationOutput | None:
     conf_match = re.search(r'"confidence"\s*:\s*(?P<c>0(?:\.\d+)?|1(?:\.0+)?)', raw)
     if conf_match:
         confidence = float(conf_match.group("c"))
-    reason = "Recovered from partial model JSON (truncated structured output)"
+    reason = "Recovered from partial model JSON (truncated or padded structured output)"
     reason_match = re.search(r'"reason"\s*:\s*"(?P<r>(?:\\.|[^"\\])*)"', raw, re.DOTALL)
     if reason_match:
         reason = reason_match.group("r").replace('\\"', '"')[:2000]

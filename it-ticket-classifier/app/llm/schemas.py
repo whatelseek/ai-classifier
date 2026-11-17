@@ -29,9 +29,9 @@ class LLMClassificationOutput(BaseModel):
 
     function: Literal["network", "linux", "security", "database", "needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
-    reason: str = Field(min_length=1, max_length=2000)
-    alternatives: list[LLMAlternative] = Field(default_factory=list)
-    evidence: list[str] = Field(default_factory=list, max_length=50)
+    reason: str = Field(min_length=1, max_length=240)
+    alternatives: list[LLMAlternative] = Field(default_factory=list, max_length=2)
+    evidence: list[str] = Field(default_factory=list, max_length=5)
 
     @field_validator("function")
     @classmethod
