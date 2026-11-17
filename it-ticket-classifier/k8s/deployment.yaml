@@ -43,10 +43,6 @@ spec:
       labels:
         app: it-ticket-classifier
     spec:
-      hostAliases:
-        - ip: "10.70.20.23"
-          hostnames:
-            - envoy.apps.vexa.home
       containers:
         - name: api
           image: ttl.sh/vexa-it-ticket-classifier:24h
@@ -60,8 +56,6 @@ spec:
                 secretKeyRef:
                   name: it-ticket-classifier
                   key: OPENAI_API_KEY
-            - name: OPENAI_BASE_URL
-              value: http://envoy.apps.vexa.home/v1
             # joey-1 on spark1 served by the qev runtime (services/joey-qev-server), not vLLM.
             - name: JOEY_ROUTING_MODE
               value: "systemone"
@@ -69,10 +63,9 @@ spec:
               value: "http://10.70.0.121:8003/v1/systemone"
             - name: JOEY_DECISION_MODEL
               value: "joey-1"
+            # A model name containing "joey" selects the System One path.
             - name: OPENAI_TEXT_MODEL
-              value: Joey-1-Local
-            - name: OPENAI_VISION_MODEL
-              value: Joey-1-Local
+              value: joey-1
             - name: DOCLING_API_URL
               value: http://10.70.0.121:8002
             - name: DOCLING_TIMEOUT_SECONDS

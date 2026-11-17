@@ -51,4 +51,6 @@ A healthy answer has `answers.team.choice = "network"` with a probability well a
 
 ## The old vLLM endpoint
 
-The vLLM container `vllm_joey` (spark1 `:8001`, model id `Joey-1-Local`, also the Envoy route) cannot serve this model. The classifier's routing no longer calls it. `OPENAI_TEXT_MODEL=Joey-1-Local` stays in the deployment because a model name containing `joey` is what selects the System One code path.
+The vLLM container `vllm_joey` (spark1 `:8001`, model id `Joey-1-Local`) cannot serve this model. The Envoy AI Gateway route for it (`AIGatewayRoute/spark-joey` and its backends in `ai-platform`) was deleted on 2026-11-17, so `x-ai-eg-model: Joey-1-Local` now returns 404 at the gateway.
+
+The classifier does not go through Envoy: the deployment has no `OPENAI_BASE_URL`, and `OPENAI_TEXT_MODEL=joey-1` is there only because a model name containing `joey` selects the System One code path.
