@@ -11,7 +11,15 @@ _PADDING_REASON_MARKERS = (
 )
 
 _BODY_HINTS: list[tuple[re.Pattern[str], str]] = [
-  (re.compile(r"failed\s+password|подбор\s+парол|brute|auth\.log|sshd\[|ssh\s+attack", re.I), "security"),
+    (
+        re.compile(
+            r"cve-\d{4}-\d+|cvss\b|уязвим|сканер|vulnerability|scan\s*report|"
+            r"regresshion|terrapin|openssh\s+rce|jenkins.*cve",
+            re.I,
+        ),
+        "security",
+    ),
+    (re.compile(r"failed\s+password|подбор\s+парол|brute|auth\.log|sshd\[|ssh\s+attack", re.I), "security"),
     (re.compile(r"фишинг|phishing|soc\b|siem|edr\b|mfa\b|компрометац", re.I), "security"),
     (re.compile(r"check\s*point|mikrotik|ipsec|vpn\b|firewall|межсетев|bgp\b|vlan", re.I), "network"),
     (re.compile(r"postgres|postgresql|mysql|mssql|max_connections|репликац|sql\b", re.I), "database"),
@@ -27,7 +35,7 @@ def should_apply_hints(result: LLMClassificationOutput) -> bool:
 
 def adjust_joey_classification(body: str, result: LLMClassificationOutput) -> LLMClassificationOutput:
     """Re-map obvious body patterns when Joey defaulted to ``database`` / ``needs_review``."""
-    if not should_apply_hints(result):
+    if result.function not in ("database", "needs_review") and not should_apply_hints(result):
         return result
     blob = body or ""
     for pattern, function in _BODY_HINTS:
