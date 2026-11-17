@@ -23,6 +23,7 @@ from app.llm.schemas import (
     JOEY_CLASSIFICATION_JSON_SCHEMA,
     LLMClassificationOutput,
 )
+from app.llm.joey_hints import adjust_joey_classification
 from app.llm.ticket_body import extract_request_body
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,8 @@ class OpenAIClassificationClient:
             if not raw:
                 raise TypeError("Empty model response")
             parsed = _parse_classification_json(raw)
+            if use_joey:
+                parsed = adjust_joey_classification(body, parsed)
         else:
             response = await self._client.responses.parse(
                 model=self._settings.openai_text_model,
