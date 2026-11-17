@@ -12,6 +12,18 @@ def test_chat_message_body():
     assert extract_request_body(raw) == "почта не принимает письма"
 
 
+def test_form_keeps_service_and_theme_with_opisanie():
+    raw = (
+        "Проанализируй заявку и вложения, составь карточку разбора.\n\n"
+        "Выбранный сервис: Антивирусная защита\n"
+        "Тема: антивирус мешает работать\n"
+        "Описание:\nантивирус мешает работать"
+    )
+    out = extract_request_body(raw)
+    assert "Антивирусная защита" in out
+    assert "антивирус мешает работать" in out
+
+
 def test_form_description_and_attachment():
     raw = (
         "Разбери обращение.\n\nНомер: TCK-1\nОписание:\nfailed password в ssh\n\n"

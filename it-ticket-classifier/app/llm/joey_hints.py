@@ -20,7 +20,14 @@ _BODY_HINTS: list[tuple[re.Pattern[str], str]] = [
         "security",
     ),
     (re.compile(r"failed\s+password|подбор\s+парол|brute|auth\.log|sshd\[|ssh\s+attack", re.I), "security"),
-    (re.compile(r"фишинг|phishing|soc\b|siem|edr\b|mfa\b|компрометац", re.I), "security"),
+    (
+        re.compile(
+            r"антивирус|антивирусн|kaspersky|defender|dr\.?\s*web|edr\b|"
+            r"фишинг|phishing|soc\b|siem|mfa\b|компрометац",
+            re.I,
+        ),
+        "security",
+    ),
     (re.compile(r"check\s*point|mikrotik|ipsec|vpn\b|firewall|межсетев|bgp\b|vlan", re.I), "network"),
     (re.compile(r"postgres|postgresql|mysql|mssql|max_connections|репликац|sql\b", re.I), "database"),
     (re.compile(r"systemd|mdadm|raid|kubernetes|k8s\b|резервн|бэкап|veeam|почта не приним", re.I), "linux"),

@@ -6,6 +6,7 @@ import re
 _INSTRUCTION_PREFIXES = (
     "Подготовь карточку разбора",
     "Разбери обращение",
+    "Проанализируй заявку",
     "Классифицируй обращение",
     "Классифицируй обращение и предложи действия",
 )
@@ -47,15 +48,17 @@ def extract_request_body(description: str) -> str:
         return _cap(body)
 
     if "Описание:" in text:
+        parts = _routing_context_lines(text)
         tail = text.split("Описание:", 1)[1]
         if "Вложения:" in tail:
             desc_part, att_part = tail.split("Вложения:", 1)
-            parts = [desc_part.strip()]
+            parts.append(desc_part.strip())
             att = att_part.strip()
             if att:
                 parts.append(att)
             return _cap("\n\n".join(parts))
-        return _cap(tail)
+        parts.append(tail.strip())
+        return _cap("\n\n".join(parts))
 
     if "Тема:" in text:
         lines = text.splitlines()
@@ -87,6 +90,18 @@ def extract_request_body(description: str) -> str:
         return _cap(text)
 
     return _cap(text)
+
+
+def _routing_context_lines(text: str) -> list[str]:
+    """Keep service and subject lines for routing (dropped from triage narrative)."""
+    lines: list[str] = []
+    for key in ("Выбранный сервис:", "Тема:"):
+        match = re.search(rf"^{re.escape(key)}\s*(.+)$", text, re.MULTILINE)
+        if match:
+            value = match.group(1).strip()
+            if value:
+                lines.append(f"{key} {value}")
+    return lines
 
 
 def _cap(text: str, limit: int = 8000) -> str:
