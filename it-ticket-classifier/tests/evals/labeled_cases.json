@@ -1,5 +1,5 @@
 [
-  {"id": "n1", "description": "Configure IPsec VPN between Check Point and MikroTik", "expected": "it_infrastructure"},
+  {"id": "n1", "description": "Configure IPsec VPN between Check Point and MikroTik", "expected": "network"},
   {"id": "d1", "description": "PostgreSQL replication is broken on prod", "expected": "database"},
   {"id": "l1", "description": "systemd unit nginx.service fails to start on Ubuntu", "expected": "it_infrastructure"},
   {"id": "s1", "description": "Investigate suspicious activity detected by SIEM", "expected": "security"},

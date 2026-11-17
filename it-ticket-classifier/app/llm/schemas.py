@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator
 from app.core.config import SUPPORTED_FUNCTIONS
 from app.core.routing import normalize_routing_function
 
-SupportFunctionLiteral = Literal["it_infrastructure", "security", "database"]
+SupportFunctionLiteral = Literal["database", "security", "network", "it_infrastructure"]
 
 
 class LLMAlternative(BaseModel):
@@ -28,13 +28,13 @@ class LLMClassificationOutput(BaseModel):
         evidence: Phrases supporting the decision.
     """
 
-    function: Literal["it_infrastructure", "security", "database", "needs_review"]
+    function: Literal["database", "security", "network", "it_infrastructure", "needs_review"]
     confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1, max_length=240)
     alternatives: list[LLMAlternative] = Field(default_factory=list, max_length=2)
     evidence: list[str] = Field(default_factory=list, max_length=5)
 
-    @field_validator("function")
+    @field_validator("function", mode="before")
     @classmethod
     def validate_function(cls, v: str) -> str:
         """Reject function codes outside the configured enumeration.
@@ -48,10 +48,9 @@ class LLMClassificationOutput(BaseModel):
         Raises:
             ValueError: When the function is not allowed.
         """
-        if v == "needs_review":
-            return v
-        normalized = normalize_routing_function(v)
-        if normalized not in SUPPORTED_FUNCTIONS:
+        raw = str(v).strip().lower()
+        normalized = normalize_routing_function(raw)
+        if normalized == "needs_review" and raw not in ("needs_review", "unclassified"):
             raise ValueError(f"Invalid function: {v}")
         return normalized
 
@@ -97,7 +96,7 @@ JOEY_CLASSIFICATION_JSON_SCHEMA: dict = {
     "properties": {
         "function": {
             "type": "string",
-            "enum": ["it_infrastructure", "security", "database", "needs_review"],
+            "enum": ["database", "security", "network", "it_infrastructure", "unclassified"],
         },
         "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
         "reason": {"type": "string", "maxLength": 240},

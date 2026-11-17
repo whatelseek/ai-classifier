@@ -29,7 +29,7 @@ async def test_health_ready_functions(app):
         assert ready.status_code == 200
         funcs = await client.get("/api/v1/functions")
         codes = {f["code"] for f in funcs.json()["functions"]}
-        assert codes == {"it_infrastructure", "security", "database"}
+        assert codes == {"database", "security", "network", "it_infrastructure"}
 
 
 @pytest.mark.asyncio
@@ -43,7 +43,8 @@ async def test_classify_text_network(app):
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] in ("classified", "needs_review")
-        assert body["classification"]["function"] in ("it_infrastructure", "needs_review")
+        assert body["classification"]["function"] in ("network", "needs_review")
+        assert body["decision"] in ("network", "unclassified")
 
 
 @pytest.mark.asyncio
@@ -57,13 +58,39 @@ async def test_score_endpoint_text_only(app):
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] in ("classified", "needs_review")
-        assert body["classification"]["function"] in (
-            "it_infrastructure",
-            "needs_review",
-            "security",
+        assert body["decision"] in (
             "database",
+            "security",
+            "network",
+            "it_infrastructure",
+            "unclassified",
         )
         assert body["processing"]["llm_calls"] in (0, 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    [
+        ({"json": {"description": "IPsec VPN tunnel is not working with Check Point"}}, "network"),
+        ({"data": {"description": "PostgreSQL replication is broken"}}, "database"),
+        ({"content": "Please help with computer", "headers": {"content-type": "text/plain"}}, "unclassified"),
+    ],
+)
+async def test_decide_endpoint(app, kwargs, expected):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/v1/decide", **kwargs)
+    assert resp.status_code == 200
+    assert resp.json()["decision"] == expected
+
+
+@pytest.mark.asyncio
+async def test_decide_requires_description(app):
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/api/v1/decide", json={})
+    assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
@@ -144,7 +171,7 @@ async def test_concurrent_requests_keep_separate_results(app):
                 data={"description": "PostgreSQL replication is broken"},
             ),
         )
-    assert network.json()["classification"]["function"] == "it_infrastructure"
+    assert network.json()["classification"]["function"] == "network"
     assert database.json()["classification"]["function"] == "database"
     assert network.json()["request_id"] != database.json()["request_id"]
 

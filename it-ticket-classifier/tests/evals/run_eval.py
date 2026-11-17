@@ -12,7 +12,7 @@ from pathlib import Path
 from app.graph.nodes.classify import _heuristic_classify
 
 CASES_PATH = Path(__file__).with_name("labeled_cases.json")
-LABELS = ("it_infrastructure", "security", "database", "needs_review")
+LABELS = ("database", "security", "network", "it_infrastructure", "needs_review")
 
 
 def main() -> None:
@@ -32,7 +32,7 @@ def main() -> None:
 
     # Macro-F1 over non-abstain classes for routing accuracy
     f1s = []
-    for label in ("it_infrastructure", "security", "database"):
+    for label in ("database", "security", "network", "it_infrastructure"):
         tp = matrix[label][label]
         fp = sum(matrix[t][label] for t in LABELS if t != label)
         fn = sum(matrix[label][p] for p in LABELS if p != label)

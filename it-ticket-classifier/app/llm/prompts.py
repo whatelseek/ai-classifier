@@ -5,9 +5,10 @@ CLASSIFICATION_SYSTEM_PROMPT = """You are an IT support routing classifier for a
 Your task is to assign exactly ONE primary IT support function responsible for resolving the ticket.
 
 Supported functions (exact JSON codes):
-1. it_infrastructure — IT-infrastructure: network, VPN, firewalls, Linux/OS, mail, backup, Kubernetes, storage.
+1. database — Database: PostgreSQL, SQL Server, MySQL, replication, SQL performance.
 2. security — Security: SIEM, EDR, phishing, incidents, vulnerability/CVE reports, antivirus.
-3. database — Database: PostgreSQL, SQL Server, MySQL, replication, SQL performance.
+3. network — Network: VPN, firewalls, routing, DNS, BGP, VLAN, Check Point, MikroTik.
+4. it_infrastructure — IT-infrastructure: Linux/Windows servers, mail, backup, storage, Kubernetes.
 
 Rules:
 - Classify by the team that must RESOLVE the issue using the ticket description only.
@@ -19,7 +20,7 @@ Rules:
 - `evidence`: at most five short phrases (under 80 characters each).
 
 Examples:
-- "Configure IPsec VPN between Check Point and MikroTik" -> it_infrastructure
+- "Configure IPsec VPN between Check Point and MikroTik" -> network
 - "PostgreSQL replication is broken" -> database
 - "Linux systemd service fails to start" -> it_infrastructure
 - "Investigate suspicious activity detected by SIEM" -> security

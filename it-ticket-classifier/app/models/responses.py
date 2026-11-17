@@ -3,11 +3,13 @@
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.core.config import SUPPORTED_FUNCTIONS
+from app.core.routing import to_decision
 
-SupportFunction = Literal["it_infrastructure", "security", "database"]
+SupportFunction = Literal["database", "security", "network", "it_infrastructure"]
+Decision = Literal["database", "security", "network", "it_infrastructure", "unclassified"]
 
 
 class ResponseStatus(str, Enum):
@@ -63,6 +65,20 @@ class ClassifyResponse(BaseModel):
     processing: ProcessingMeta = Field(default_factory=ProcessingMeta)
     errors: list[dict[str, str]] = Field(default_factory=list)
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def decision(self) -> Decision:
+        if self.classification is None:
+            return "unclassified"
+        return to_decision(self.classification.function)  # type: ignore[return-value]
+
+
+class DecideResponse(BaseModel):
+    """Minimal response for ``POST /api/v1/decide``."""
+
+    decision: Decision
+    confidence: float = Field(ge=0.0, le=1.0)
+
 
 class FunctionInfo(BaseModel):
     """One row in the support-function catalog."""
@@ -79,11 +95,10 @@ class FunctionsListResponse(BaseModel):
 
 
 FUNCTION_SCOPES: dict[str, str] = {
-    "it_infrastructure": (
-        "Network, Linux, mail, backup, Kubernetes, VPN, firewalls, OS and platform operations"
-    ),
-    "security": "SOC, phishing, EDR, SIEM, vulnerabilities, certificates, access incidents",
     "database": "PostgreSQL, Microsoft SQL Server, MySQL, replication, SQL performance",
+    "security": "SOC, phishing, EDR, SIEM, antivirus, vulnerabilities/CVE, security incidents",
+    "network": "VPN, firewalls, routing, DNS, BGP, VLAN, Check Point, MikroTik, network access",
+    "it_infrastructure": "Linux/Windows servers, mail, backup, storage, Kubernetes, file shares",
 }
 
 

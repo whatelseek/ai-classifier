@@ -29,8 +29,11 @@ _BODY_HINTS: list[tuple[re.Pattern[str], str]] = [
         "security",
     ),
     (
+        re.compile(r"check\s*point|mikrotik|ipsec|vpn\b|впн|firewall|межсетев|bgp\b|vlan", re.IGNORECASE),
+        "network",
+    ),
+    (
         re.compile(
-            r"check\s*point|mikrotik|ipsec|vpn\b|firewall|межсетев|bgp\b|vlan|"
             r"systemd|mdadm|raid|kubernetes|k8s\b|резервн|бэкап|veeam|почта не приним",
             re.IGNORECASE,
         ),

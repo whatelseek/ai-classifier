@@ -3,8 +3,13 @@
 from app.graph.nodes.classify import _heuristic_classify
 
 
-def test_heuristic_it_infrastructure():
+def test_heuristic_network():
     out = _heuristic_classify("Configure IPsec VPN on MikroTik", "")
+    assert out["function"] == "network"
+
+
+def test_heuristic_it_infrastructure():
+    out = _heuristic_classify("systemd unit fails on Ubuntu server", "")
     assert out["function"] == "it_infrastructure"
 
 

@@ -283,7 +283,7 @@ def _normalize_vllm_structured_json(raw: str) -> str:
     """Repair Joey/vLLM structured outputs that pad with tabs after ``confidence``."""
     text = raw.strip()
     func_match = re.search(
-        r'"function"\s*:\s*"(?P<func>it_infrastructure|network|linux|security|database|needs_review)"',
+        r'"function"\s*:\s*"(?P<func>it_infrastructure|network|linux|security|database|needs_review|unclassified)"',
         text,
         flags=re.IGNORECASE,
     )
@@ -335,7 +335,7 @@ def _parse_classification_json(raw: str) -> LLMClassificationOutput:
 def _salvage_classification_json(raw: str) -> LLMClassificationOutput | None:
     """Recover classification when vLLM returns truncated JSON."""
     func_match = re.search(
-        r'"function"\s*:\s*"(?P<func>it_infrastructure|network|linux|security|database|needs_review)"',
+        r'"function"\s*:\s*"(?P<func>it_infrastructure|network|linux|security|database|needs_review|unclassified)"',
         raw,
         re.IGNORECASE,
     )

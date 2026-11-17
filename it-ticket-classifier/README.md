@@ -1,6 +1,6 @@
 # IT Ticket Classifier
 
-Production-oriented AI agent that classifies IT tickets into **IT-infrastructure** (`it_infrastructure`), **Security**, or **Database** using **ticket description only** (attachments are still extracted but not used for routing).
+Production-oriented AI agent: input is a ticket **description**, output is a **decision** — `database`, `security`, `network`, `it_infrastructure`, or `unclassified` (`POST /api/v1/decide`).
 
 Built with **FastAPI**, **LangGraph**, **OpenAI Responses API**, and **Docling** for document extraction.
 

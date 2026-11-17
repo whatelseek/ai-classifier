@@ -6,12 +6,14 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-SUPPORTED_FUNCTIONS = ("it_infrastructure", "security", "database")
+SUPPORTED_FUNCTIONS = ("database", "security", "network", "it_infrastructure")
+UNCLASSIFIED = "unclassified"
 
 FUNCTION_DISPLAY_NAMES: dict[str, str] = {
-    "it_infrastructure": "IT-infrastructure",
-    "security": "Security",
     "database": "Database",
+    "security": "Security",
+    "network": "Network",
+    "it_infrastructure": "IT-infrastructure",
 }
 
 

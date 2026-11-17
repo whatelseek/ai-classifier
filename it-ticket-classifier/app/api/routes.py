@@ -4,7 +4,7 @@ import time
 import uuid
 
 import anyio
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
 from app.api.dependencies import get_app_settings, get_request_semaphore
 from app.core.config import Settings
@@ -12,6 +12,7 @@ from app.core.errors import REQUEST_TIMEOUT
 from app.models.requests import ClassifyRequestPayload, UploadedAttachment
 from app.models.responses import (
     ClassifyResponse,
+    DecideResponse,
     FunctionsListResponse,
     ProcessingMeta,
     ResponseStatus,
@@ -80,6 +81,41 @@ async def score_ticket(
         semaphore=semaphore,
         scoring_only=True,
     )
+
+
+@router.post("/api/v1/decide", response_model=DecideResponse)
+async def decide_ticket(
+    request: Request,
+    settings: Settings = Depends(get_app_settings),
+    semaphore=Depends(get_request_semaphore),
+) -> DecideResponse:
+    """Ticket description in, one decision out.
+
+    Accepts JSON ``{"description": "..."}``, a form field ``description``,
+    or a ``text/plain`` body.
+    """
+    content_type = request.headers.get("content-type", "")
+    if content_type.startswith("application/json"):
+        data = await request.json()
+        description = data.get("description") if isinstance(data, dict) else None
+    elif content_type.startswith(("application/x-www-form-urlencoded", "multipart/form-data")):
+        description = (await request.form()).get("description")
+    else:
+        description = (await request.body()).decode("utf-8", errors="replace")
+    if not isinstance(description, str) or not description.strip():
+        raise HTTPException(status_code=422, detail="description is required")
+
+    response = await classify_ticket(
+        description=description,
+        issue_key=None,
+        client=None,
+        files=[],
+        settings=settings,
+        semaphore=semaphore,
+        scoring_only=True,
+    )
+    confidence = response.classification.confidence if response.classification else 0.0
+    return DecideResponse(decision=response.decision, confidence=confidence)
 
 
 @router.post("/api/v1/classify", response_model=ClassifyResponse)
