@@ -106,6 +106,13 @@ OPENAI_API_KEY=sk-... pytest -m live_openai  # none shipped enabled by default
 
 Classification logic is transport-agnostic so a future Jira webhook adapter can call the same graph.
 
+## Baseten Joey (scoring only)
+
+To mirror prod routing in **Baseten → Joey 1 → Support routing**, use four labels
+`network` / `linux` / `security` / `database` and paste only the ticket body into
+**State**. See [docs/baseten-joey-scoring.md](docs/baseten-joey-scoring.md) and
+[config/baseten-support-routing.json](config/baseten-support-routing.json).
+
 ## Known limitations (MVP)
 
 - Legacy `.doc`, `.xls`, `.ppt`, `.vsd` require external conversion adapters (explicit failure today)
