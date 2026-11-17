@@ -62,7 +62,7 @@ JOEY_DECISION_MODEL: joey-1
 OPENAI_TEXT_MODEL: joey-1
 ```
 
-The question and the five class descriptions are `JOEY_ROUTE_INSTRUCTIONS` and `JOEY_CRITERIA_DATABASE`, `JOEY_CRITERIA_SECURITY`, `JOEY_CRITERIA_NETWORK`, `JOEY_CRITERIA_IT_INFRASTRUCTURE`, `JOEY_CRITERIA_UNCLASSIFIED` in the same deployment. Editing them and restarting the pod changes routing; Joey does not need a restart, and the image does not need a rebuild. Unset, the process uses the wording that scored 80.1%.
+The question and the five class descriptions are `JOEY_ROUTE_INSTRUCTIONS` and `JOEY_CRITERIA_DATABASE`, `JOEY_CRITERIA_SECURITY`, `JOEY_CRITERIA_NETWORK`, `JOEY_CRITERIA_IT_INFRASTRUCTURE`, `JOEY_CRITERIA_UNCLASSIFIED` in the same deployment. Editing them and restarting the pod changes routing; Joey does not need a restart, and the image does not need a rebuild. Unset, the process uses the wording that scored 80.1%. One ticket per class, with the answers that wording returns, is in [baseten-joey-scoring.md](baseten-joey-scoring.md).
 
 There is no `OPENAI_BASE_URL`. The classifier selects this path when `JOEY_SYSTEMONE_URL` is set and the text model name contains `joey`. `GET /ready` then reports `joey_uses_systemone: true`. No API key is sent to the self-hosted server.
 
